@@ -1,96 +1,9 @@
 # ==========================================================
 # DARK-CLI: Конфигурационный файл
 # ==========================================================
-# Здесь вы можете настроить любые команды, скрипты и программы.
-# Каждая секция [[actions]] добавляет действие в меню и палитру поиска.
 
 [settings]
 # default_cwd = "A:\\git_project1"
 # shell = "cmd"
 
-# --- Разработка ---
-[[actions]]
-id = "cargo-check"
-name = "Проверка Cargo"
-description = "Быстрая проверка компиляции без сборки исполняемого файла"
-category = "Разработка"
-command = "cargo check"
-shortcut = "c"
-
-[[actions]]
-id = "cargo-build"
-name = "Сборка Cargo"
-description = "Сборка debug-бинарника проекта"
-category = "Разработка"
-command = "cargo build"
-shortcut = "b"
-
-[[actions]]
-id = "cargo-run"
-name = "Запуск Cargo"
-description = "Сборка и запуск текущего проекта"
-category = "Разработка"
-command = "cargo run"
-
-[[actions]]
-id = "cargo-test"
-name = "Тесты Cargo"
-description = "Запуск модульных и интеграционных тестов"
-category = "Разработка"
-command = "cargo test"
-shortcut = "t"
-
-# --- Git ---
-[[actions]]
-id = "git-status"
-name = "Статус Git"
-description = "Просмотр измененных и неотслеживаемых файлов"
-category = "Git"
-command = "git status -s"
-shortcut = "g"
-
-[[actions]]
-id = "git-log"
-name = "История Git (Log)"
-description = "Последние коммиты репозитория в виде дерева"
-category = "Git"
-command = "git log --oneline -n 10 --graph"
-shortcut = "l"
-
-[[actions]]
-id = "git-diff"
-name = "Изменения Git (Diff)"
-description = "Просмотр текущих незакоммиченных изменений"
-category = "Git"
-command = "git diff --stat"
-
-# --- Системные программы ---
-[[actions]]
-id = "open-folder"
-name = "Открыть папку"
-description = "Открыть текущую рабочую директорию в Проводнике Windows"
-category = "Система"
-command = "explorer ."
-shortcut = "e"
-
-[[actions]]
-id = "sys-ip"
-name = "Сетевые настройки"
-description = "Показать сетевую конфигурацию и IP-адреса (ipconfig)"
-category = "Система"
-command = "ipconfig"
-
-[[actions]]
-id = "task-list"
-name = "Список процессов"
-description = "Список первых 15 процессов в системе"
-category = "Система"
-command = "powershell -NoProfile -Command \"Get-Process | Select-Object -First 15 Name, Id, CPU | Format-Table -AutoSize\""
-
-# --- Веб и ссылки ---
-[[actions]]
-id = "open-github"
-name = "Открыть GitHub"
-description = "Открыть сайт GitHub в браузере по умолчанию"
-category = "Веб"
-command = "cmd /c start https://github.com"
+# Список действий пуст. Готов к добавлению новых команд!
