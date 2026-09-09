@@ -26,6 +26,7 @@ pub fn render_actions_view(f: &mut Frame, app: &App, area: Rect) {
                 ViewItem::Folder { name, count } => {
                     let icon = match name.to_lowercase().as_str() {
                         "zapret" => "📁 ⚡ ",
+                        "telegram proxy" | "tg proxy" | "telegram" | "tg-proxy" => "📁 ✈️ ",
                         "разработка" | "dev" => "📁 💻 ",
                         "система" | "system" => "📁 🛠 ",
                         "git" => "📁 🌿 ",
@@ -47,6 +48,12 @@ pub fn render_actions_view(f: &mut Frame, app: &App, area: Rect) {
 
                     if name.eq_ignore_ascii_case("zapret") {
                         if app.is_zapret_installed() {
+                            line_spans.push(Span::styled("[🟢 Установлен] ", Style::default().fg(Color::Green)));
+                        } else {
+                            line_spans.push(Span::styled("[🔴 Не установлен] ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)));
+                        }
+                    } else if name.eq_ignore_ascii_case("telegram proxy") || name.eq_ignore_ascii_case("tg proxy") {
+                        if app.is_tg_proxy_installed() {
                             line_spans.push(Span::styled("[🟢 Установлен] ", Style::default().fg(Color::Green)));
                         } else {
                             line_spans.push(Span::styled("[🔴 Не установлен] ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)));
@@ -90,8 +97,10 @@ pub fn render_actions_view(f: &mut Frame, app: &App, area: Rect) {
                     }
 
                     // Dynamically name install action if not installed
-                    let display_name = if action.id == "zapret-update" && !app.is_zapret_installed() {
+                    let display_name: &str = if action.id == "zapret-update" && !app.is_zapret_installed() {
                         "Установить Zapret"
+                    } else if action.id == "tg-proxy-update" && !app.is_tg_proxy_installed() {
+                        "Установить TG WS Proxy"
                     } else {
                         &action.name
                     };
@@ -186,6 +195,45 @@ pub fn render_actions_view(f: &mut Frame, app: &App, area: Rect) {
                         lines.push(Line::from(vec![
                             Span::styled("Действие:      ", Style::default().fg(Theme::MUTED)),
                             Span::styled("Нажмите [u] или выберите установку (в C:\\zapret или свою папку)", Style::default().fg(Color::Yellow)),
+                        ]));
+                    }
+                } else if name.eq_ignore_ascii_case("telegram proxy") || name.eq_ignore_ascii_case("tg proxy") {
+                    lines.push(Line::from(""));
+                    lines.push(Line::from(vec![
+                        Span::styled("─── СТАТУС TG WS PROXY ───", Style::default().fg(Theme::PRIMARY).add_modifier(Modifier::BOLD)),
+                    ]));
+                    let (is_installed, path, version, is_running, port) = app.get_tg_proxy_summary();
+                    if is_installed {
+                        lines.push(Line::from(vec![
+                            Span::styled("Статус:        ", Style::default().fg(Theme::MUTED)),
+                            Span::styled("🟢 Установлен на этом ПК", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+                        ]));
+                        if let Some(p) = path {
+                            lines.push(Line::from(vec![
+                                Span::styled("Файл:          ", Style::default().fg(Theme::MUTED)),
+                                Span::styled(p.display().to_string(), Style::default().fg(Color::Cyan)),
+                            ]));
+                        }
+                        if let Some(v) = version {
+                            lines.push(Line::from(vec![
+                                Span::styled("Версия:        ", Style::default().fg(Theme::MUTED)),
+                                Span::styled(v, Style::default().fg(Color::White)),
+                            ]));
+                        }
+                        let proc_str = if is_running { "🟢 Работает" } else { "🔴 Остановлен" };
+                        lines.push(Line::from(vec![
+                            Span::styled("Процесс:       ", Style::default().fg(Theme::MUTED)),
+                            Span::styled(proc_str, if is_running { Style::default().fg(Color::Green) } else { Style::default().fg(Color::Red) }),
+                            Span::styled(format!(" (порт {})", port), Style::default().fg(Theme::MUTED)),
+                        ]));
+                    } else {
+                        lines.push(Line::from(vec![
+                            Span::styled("Статус:        ", Style::default().fg(Theme::MUTED)),
+                            Span::styled("🔴 НЕ УСТАНОВЛЕН НА ЭТОМ ПК", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+                        ]));
+                        lines.push(Line::from(vec![
+                            Span::styled("Действие:      ", Style::default().fg(Theme::MUTED)),
+                            Span::styled("Нажмите [u] для загрузки TgWsProxy_windows.exe с GitHub", Style::default().fg(Color::Yellow)),
                         ]));
                     }
                 }
@@ -313,6 +361,33 @@ pub fn render_actions_view(f: &mut Frame, app: &App, area: Rect) {
                         lines.push(Line::from(vec![
                             Span::styled("Подсказка:    ", Style::default().fg(Theme::MUTED)),
                             Span::styled("При запуске будет предложено выбрать папку установки", Style::default().fg(Color::Yellow)),
+                        ]));
+                    }
+                } else if action.category.eq_ignore_ascii_case("telegram proxy") || action.category.eq_ignore_ascii_case("tg proxy") {
+                    lines.push(Line::from(""));
+                    lines.push(Line::from(vec![
+                        Span::styled("─── СТАТУС TG WS PROXY ───", Style::default().fg(Theme::PRIMARY).add_modifier(Modifier::BOLD)),
+                    ]));
+                    if let Some(p) = app.get_tg_proxy_path() {
+                        let (is_running, port) = app.get_tg_proxy_running_state();
+                        let state_str = if is_running { "🟢 Работает" } else { "🔴 Остановлен" };
+                        lines.push(Line::from(vec![
+                            Span::styled("Программа:    ", Style::default().fg(Theme::MUTED)),
+                            Span::styled(format!("🟢 Установлен ({})", p.file_name().unwrap_or_default().to_string_lossy()), Style::default().fg(Color::Green)),
+                        ]));
+                        lines.push(Line::from(vec![
+                            Span::styled("Процесс:      ", Style::default().fg(Theme::MUTED)),
+                            Span::styled(state_str, if is_running { Style::default().fg(Color::Green) } else { Style::default().fg(Color::Red) }),
+                            Span::styled(format!(" (порт {})", port), Style::default().fg(Theme::MUTED)),
+                        ]));
+                    } else {
+                        lines.push(Line::from(vec![
+                            Span::styled("Установка:    ", Style::default().fg(Theme::MUTED)),
+                            Span::styled("🔴 Не установлен на этом ПК", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+                        ]));
+                        lines.push(Line::from(vec![
+                            Span::styled("Подсказка:    ", Style::default().fg(Theme::MUTED)),
+                            Span::styled("Нажмите [u] для загрузки с GitHub", Style::default().fg(Color::Yellow)),
                         ]));
                     }
                 }

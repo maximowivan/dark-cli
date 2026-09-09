@@ -10,6 +10,7 @@ use std::time::Duration;
 pub struct TgProxySummary {
     pub is_installed: bool,
     pub exe_path: Option<PathBuf>,
+    pub version: Option<String>,
     pub is_running: bool,
     pub pids: Vec<u32>,
     pub is_port_listening: bool,
@@ -29,6 +30,7 @@ impl TgProxyManager {
     pub fn get_summary(config: &TgProxyConfig) -> TgProxySummary {
         let exe_path = config.get_resolved_path();
         let is_installed = exe_path.is_some();
+        let version = exe_path.as_deref().and_then(Self::get_local_version);
         let pids = Self::get_running_pids();
         let is_running = !pids.is_empty();
 
@@ -60,6 +62,7 @@ impl TgProxyManager {
         TgProxySummary {
             is_installed,
             exe_path,
+            version,
             is_running,
             pids,
             is_port_listening,
@@ -87,6 +90,9 @@ impl TgProxyManager {
             out.push_str("📌 Статус установки:  🟢 Установлен на этом компьютере\n");
             if let Some(ref path) = summary.exe_path {
                 out.push_str(&format!("📁 Файл программы:    {}\n", path.display()));
+            }
+            if let Some(ref ver) = summary.version {
+                out.push_str(&format!("🏷  Версия программы:  {}\n", ver));
             }
         } else {
             out.push_str("📌 Статус установки:  🔴 НЕ УСТАНОВЛЕН НА ЭТОМ ПК\n");
@@ -367,8 +373,11 @@ impl TgProxyManager {
     }
 
     /// Загрузить / Обновить TgWsProxy_windows.exe с GitHub
-    pub fn update(config: &TgProxyConfig, path: Option<&Path>, _force: bool) -> Result<String, String> {
-        let (latest_tag, download_url) = Self::get_latest_github_release_asset(&config.github_repo)?;
+    pub fn update(config: &TgProxyConfig, path: Option<&Path>, force: bool) -> Result<String, String> {
+        let mut log = String::new();
+        log.push_str("====================================================\n");
+        log.push_str("    ОБНОВЛЕНИЕ / УСТАНОВКА FLOWSEAL TG WS PROXY     \n");
+        log.push_str("====================================================\n\n");
 
         // Определяем куда сохранять
         let target_exe = match path {
@@ -388,7 +397,42 @@ impl TgProxyManager {
             }
         };
 
-        // Останавливаем старый процесс, если запущен
+        let is_installed = target_exe.exists();
+        let local_version = Self::get_local_version(&target_exe).unwrap_or_default();
+
+        log.push_str(&format!("📁 Файл программы:    {}\n", target_exe.display()));
+        if is_installed && !local_version.is_empty() {
+            log.push_str(&format!("📌 Текущая версия:    {}\n", local_version));
+        }
+
+        // 1. Проверка последнего релиза на GitHub
+        log.push_str("🔍 1/4: Запрос актуального релиза на GitHub...\n");
+        let (latest_tag, download_url) = Self::get_latest_github_release_asset(&config.github_repo)?;
+        log.push_str(&format!("📦 Последний релиз:   {}\n", latest_tag));
+
+        // Проверка: актуальна ли уже установленная версия
+        if is_installed && !force && !local_version.is_empty() {
+            let clean_local = local_version.trim_start_matches('v');
+            let clean_latest = latest_tag.trim_start_matches('v');
+            if clean_local == clean_latest {
+                return Ok(format!(
+                    "✨ У вас уже установлена актуальная версия TG WS Proxy ({})!\n\
+                     📁 Файл программы: {}\n\
+                     Обновление не требуется.\n\n\
+                     💡 Для принудительной переустановки используйте флаг --force:\n\
+                        dark-cli tg-proxy update --force",
+                    local_version,
+                    target_exe.display()
+                ));
+            }
+        }
+
+        if force && is_installed {
+            log.push_str("⚡ Запрошено принудительное обновление (--force).\n");
+        }
+
+        // 2. Остановка старого процесса
+        log.push_str("🛑 2/4: Остановка активных процессов TG WS Proxy...\n");
         let _ = Self::stop(config);
         sleep(Duration::from_millis(500));
 
@@ -396,7 +440,8 @@ impl TgProxyManager {
             let _ = fs::create_dir_all(parent);
         }
 
-        println!("Загрузка {}...", download_url);
+        // 3. Скачивание
+        log.push_str(&format!("⬇ 3/4: Загрузка {}...\n", download_url));
         let download_script = format!(
             "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; \
              $url = '{}'; \
@@ -413,19 +458,116 @@ impl TgProxyManager {
             return Err("Файл не был создан после скачивания.".to_string());
         }
 
-        // Автоматически запускаем обновленный прокси
+        // Сохраняем версию в файл рядом и в AppData
+        let _ = Self::save_local_version(&target_exe, &latest_tag);
+
+        log.push_str("   Файл успешно загружен.\n");
+
+        // 4. Запуск обновленного прокси
+        log.push_str("🚀 4/4: Запуск обновленного TG WS Proxy...\n");
         sleep(Duration::from_millis(500));
         let mut new_config = config.clone();
         new_config.path = Some(target_exe.display().to_string());
         let _ = Self::start(&new_config);
 
-        Ok(format!(
-            "🎉 TG WS Proxy успешно обновлен до версии {}!\n\
-             📁 Расположение: {}\n\
-             Прокси запущен и готов к работе в фоновом режиме.",
-            latest_tag,
-            target_exe.display()
-        ))
+        log.push_str(&format!(
+            "\n🎉 ОБНОВЛЕНИЕ УСПЕШНО ЗАВЕРШЕНО! Установлена версия {}.\n\
+             Значок программы появился в системном трее Windows рядом с часами.\n",
+            latest_tag
+        ));
+        Ok(log)
+    }
+
+    /// Сохранить информацию о версии прокси
+    pub fn save_local_version(exe: &Path, version: &str) -> Result<(), String> {
+        let clean_ver = if version.starts_with('v') { version.to_string() } else { format!("v{}", version) };
+        if let Some(appdata) = TgProxyConfig::get_appdata_dir() {
+            let _ = fs::create_dir_all(&appdata);
+            let vfile = appdata.join("version.txt");
+            let _ = fs::write(&vfile, &clean_ver);
+        }
+        if let Some(parent) = exe.parent() {
+            let _ = fs::create_dir_all(parent);
+            let vfile = parent.join("version.txt");
+            let _ = fs::write(&vfile, &clean_ver);
+        }
+        Ok(())
+    }
+
+    /// Определить установленную версию TG WS Proxy
+    pub fn get_local_version(exe: &Path) -> Option<String> {
+        // 1. Проверяем version.txt в AppData
+        if let Some(appdata) = TgProxyConfig::get_appdata_dir() {
+            let vfile = appdata.join("version.txt");
+            if let Ok(c) = fs::read_to_string(&vfile) {
+                let tr = c.trim();
+                if !tr.is_empty() {
+                    return Some(if tr.starts_with('v') { tr.to_string() } else { format!("v{}", tr) });
+                }
+            }
+        }
+
+        // 2. Проверяем version.txt рядом с exe
+        if let Some(parent) = exe.parent() {
+            let vfile = parent.join("version.txt");
+            if let Ok(c) = fs::read_to_string(&vfile) {
+                let tr = c.trim();
+                if !tr.is_empty() {
+                    return Some(if tr.starts_with('v') { tr.to_string() } else { format!("v{}", tr) });
+                }
+            }
+        }
+
+        // 3. Проверяем строки в proxy.log на наличие версии
+        if let Some(log_path) = TgProxyConfig::get_log_file_path() {
+            if let Ok(content) = fs::read_to_string(&log_path) {
+                for line in content.lines() {
+                    if let Some(idx) = line.find("версия ") {
+                        let rest = &line[idx + "версия ".len()..];
+                        if let Some(ver) = rest.split_whitespace().next() {
+                            let clean_ver = ver.trim();
+                            if !clean_ver.is_empty() {
+                                return Some(format!("v{}", clean_ver.trim_start_matches('v')));
+                            }
+                        }
+                    } else if let Some(idx) = line.find("version ") {
+                        let rest = &line[idx + "version ".len()..];
+                        if let Some(ver) = rest.split_whitespace().next() {
+                            let clean_ver = ver.trim();
+                            if !clean_ver.is_empty() {
+                                return Some(format!("v{}", clean_ver.trim_start_matches('v')));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 4. Проверяем метаданные PE файла (ProductVersion) через PowerShell
+        #[cfg(target_os = "windows")]
+        if exe.exists() {
+            let script = format!(
+                "(Get-Item '{}' -ErrorAction SilentlyContinue).VersionInfo.ProductVersion",
+                exe.display()
+            );
+            if let Ok(out) = Self::run_powershell(&script) {
+                let trimmed = out.trim();
+                if !trimmed.is_empty() && trimmed != "0.0.0.0" {
+                    let parts: Vec<&str> = trimmed.split('.').collect();
+                    if parts.len() >= 2 {
+                        let short = if parts.len() >= 3 && parts[2] != "0" {
+                            format!("{}.{}.{}", parts[0], parts[1], parts[2])
+                        } else {
+                            format!("{}.{}", parts[0], parts[1])
+                        };
+                        return Some(format!("v{}", short));
+                    }
+                    return Some(format!("v{}", trimmed.trim_start_matches('v')));
+                }
+            }
+        }
+
+        None
     }
 
     // --- Внутренние вспомогательные методы ---

@@ -179,6 +179,36 @@ impl App {
         crate::zapret::ZapretManager::get_install_summary(cfg)
     }
 
+    pub fn is_tg_proxy_installed(&self) -> bool {
+        self.config.tg_proxy.as_ref().map(|tp| tp.is_installed()).unwrap_or(false)
+            || crate::config::TgProxyConfig::default().is_installed()
+    }
+
+    pub fn get_tg_proxy_path(&self) -> Option<PathBuf> {
+        self.config.tg_proxy.as_ref().and_then(|tp| tp.get_resolved_path())
+            .or_else(|| crate::config::TgProxyConfig::default().get_resolved_path())
+    }
+
+    pub fn get_tg_proxy_summary(&self) -> (bool, Option<PathBuf>, Option<String>, bool, u16) {
+        let default_cfg = crate::config::TgProxyConfig::default();
+        let cfg = self.config.tg_proxy.as_ref().unwrap_or(&default_cfg);
+        let summary = crate::tg_proxy::TgProxyManager::get_summary(cfg);
+        (
+            summary.is_installed,
+            summary.exe_path,
+            summary.version,
+            summary.is_running,
+            summary.port,
+        )
+    }
+
+    pub fn get_tg_proxy_running_state(&self) -> (bool, u16) {
+        let default_cfg = crate::config::TgProxyConfig::default();
+        let cfg = self.config.tg_proxy.as_ref().unwrap_or(&default_cfg);
+        let summary = crate::tg_proxy::TgProxyManager::get_summary(cfg);
+        (summary.is_running, summary.port)
+    }
+
     pub fn start_zapret_install_dialog(&mut self) {
         self.install_dialog = Some(InstallDialogState::ChooseOption { selected: 0 });
     }
