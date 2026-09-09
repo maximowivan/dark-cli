@@ -3,6 +3,7 @@ pub mod header;
 pub mod help_view;
 pub mod history_view;
 pub mod input_bar;
+pub mod install_modal;
 pub mod output_view;
 pub mod palette;
 pub mod theme;
@@ -40,5 +41,7 @@ pub fn render(f: &mut Frame, app: &App) {
     // 4. Modal Overlays
     if app.input_mode == InputMode::PaletteSearch {
         palette::render_palette(f, app, size);
+    } else if app.install_dialog.is_some() {
+        install_modal::render_install_modal(f, app, size);
     }
 }

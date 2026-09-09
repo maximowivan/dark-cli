@@ -55,6 +55,10 @@ impl Default for ZapretConfig {
 }
 
 impl ZapretConfig {
+    pub fn is_installed(&self) -> bool {
+        self.get_resolved_path().is_some()
+    }
+
     pub fn get_resolved_path(&self) -> Option<PathBuf> {
         if let Some(ref p) = self.path {
             let pb = PathBuf::from(p);
@@ -270,6 +274,21 @@ impl AppConfig {
         }
     }
 
+    pub fn save(&self, path: &Path) -> Result<(), String> {
+        let toml_str = self.to_toml_string();
+        fs::write(path, toml_str).map_err(|e| format!("Не удалось сохранить {}: {}", path.display(), e))
+    }
+
+    pub fn set_zapret_path(&mut self, path: String) {
+        if let Some(ref mut z) = self.zapret {
+            z.path = Some(path);
+        } else {
+            let mut z = ZapretConfig::default();
+            z.path = Some(path);
+            self.zapret = Some(z);
+        }
+    }
+
     pub fn to_toml_string(&self) -> String {
         let mut out = String::new();
         out.push_str("# Конфигурационный файл Dark CLI / Launcher\n");
@@ -277,6 +296,15 @@ impl AppConfig {
         out.push_str("[settings]\n");
         out.push_str("# default_cwd = \"C:\\\\projects\"\n");
         out.push_str("# shell = \"powershell\" # или \"cmd\"\n\n");
+
+        if let Some(ref z) = self.zapret {
+            out.push_str("[zapret]\n");
+            if let Some(ref p) = z.path {
+                out.push_str(&format!("path = {:?}\n", p));
+            }
+            out.push_str(&format!("service_name = {:?}\n", z.service_name));
+            out.push_str(&format!("github_repo = {:?}\n\n", z.github_repo));
+        }
 
         for action in &self.actions {
             out.push_str("[[actions]]\n");

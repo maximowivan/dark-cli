@@ -48,6 +48,12 @@ enum Commands {
 enum ZapretCommands {
     /// Проверить статус службы, процессов и актуальность версии
     Status,
+    /// Установить Zapret с GitHub (с выбором папки)
+    Install {
+        /// Путь для установки (по умолчанию C:\zapret)
+        #[arg(short, long)]
+        path: Option<String>,
+    },
     /// Запустить службу Zapret
     Start,
     /// Остановить службу Zapret и процессы winws
@@ -59,6 +65,9 @@ enum ZapretCommands {
         /// Принудительно обновить, даже если версия уже совпадает
         #[arg(short, long)]
         force: bool,
+        /// Путь к папке Zapret для обновления/установки
+        #[arg(short, long)]
+        path: Option<String>,
     },
     /// Открыть папку с программой Zapret в Проводнике
     Open,
@@ -111,7 +120,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             return Ok(());
         }
         Some(Commands::Zapret { action }) => {
-            let zapret_cfg = config.zapret.unwrap_or_default();
+            let zapret_cfg = config.zapret.clone().unwrap_or_default();
             match action {
                 ZapretCommands::Status => {
                     println!("{}", ZapretManager::get_status(&zapret_cfg));
@@ -134,6 +143,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 }
+                ZapretCommands::Install { path } => {
+                    let chosen_path = match path {
+                        Some(p) => std::path::PathBuf::from(p),
+                        None => match ZapretManager::prompt_install_path("C:\\zapret") {
+                            Ok(p) => p,
+                            Err(e) => {
+                                eprintln!("{}", e);
+                                std::process::exit(1);
+                            }
+                        },
+                    };
+                    let mut updated_config = config.clone();
+                    updated_config.set_zapret_path(chosen_path.display().to_string());
+                    let _ = updated_config.save(&config_path);
+
+                    let effective_zapret_cfg = updated_config.zapret.unwrap_or_default();
+                    match ZapretManager::update(&effective_zapret_cfg, Some(&chosen_path), true) {
+                        Ok(msg) => println!("{}", msg),
+                        Err(e) => {
+                            eprintln!("Ошибка установки: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
                 ZapretCommands::Restart => {
                     match ZapretManager::restart(&zapret_cfg) {
                         Ok(msg) => println!("{}", msg),
@@ -143,8 +176,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 }
-                ZapretCommands::Update { force } => {
-                    match ZapretManager::update(&zapret_cfg, force) {
+                ZapretCommands::Update { force, path } => {
+                    let target_path = if let Some(p) = path {
+                        let pb = std::path::PathBuf::from(p);
+                        let mut updated_config = config.clone();
+                        updated_config.set_zapret_path(pb.display().to_string());
+                        let _ = updated_config.save(&config_path);
+                        Some(pb)
+                    } else if zapret_cfg.get_resolved_path().is_none() {
+                        let pb = match ZapretManager::prompt_install_path("C:\\zapret") {
+                            Ok(p) => p,
+                            Err(e) => {
+                                eprintln!("{}", e);
+                                std::process::exit(1);
+                            }
+                        };
+                        let mut updated_config = config.clone();
+                        updated_config.set_zapret_path(pb.display().to_string());
+                        let _ = updated_config.save(&config_path);
+                        Some(pb)
+                    } else {
+                        None
+                    };
+
+                    match ZapretManager::update(&zapret_cfg, target_path.as_deref(), force) {
                         Ok(msg) => println!("{}", msg),
                         Err(e) => {
                             eprintln!("Ошибка обновления: {}", e);
@@ -242,6 +297,61 @@ fn main_loop(
                     break;
                 }
 
+                if let Some(ref dialog) = app.install_dialog.clone() {
+                    match dialog {
+                        app::InstallDialogState::ChooseOption { selected } => match key.code {
+                            KeyCode::Esc => {
+                                app.install_dialog = None;
+                            }
+                            KeyCode::Up | KeyCode::Char('k') => {
+                                app.install_dialog = Some(app::InstallDialogState::ChooseOption { selected: 0 });
+                            }
+                            KeyCode::Down | KeyCode::Char('j') => {
+                                app.install_dialog = Some(app::InstallDialogState::ChooseOption { selected: 1 });
+                            }
+                            KeyCode::Char('1') => {
+                                app.confirm_install_path("C:\\zapret");
+                            }
+                            KeyCode::Char('2') => {
+                                app.install_dialog = Some(app::InstallDialogState::EnterPath {
+                                    input: String::from("C:\\zapret"),
+                                });
+                            }
+                            KeyCode::Enter => {
+                                if *selected == 0 {
+                                    app.confirm_install_path("C:\\zapret");
+                                } else {
+                                    app.install_dialog = Some(app::InstallDialogState::EnterPath {
+                                        input: String::from("C:\\zapret"),
+                                    });
+                                }
+                            }
+                            _ => {}
+                        },
+                        app::InstallDialogState::EnterPath { input } => match key.code {
+                            KeyCode::Esc => {
+                                app.install_dialog = Some(app::InstallDialogState::ChooseOption { selected: 1 });
+                            }
+                            KeyCode::Enter => {
+                                let path_to_install = input.clone();
+                                app.confirm_install_path(&path_to_install);
+                            }
+                            KeyCode::Backspace => {
+                                let mut new_inp = input.clone();
+                                new_inp.pop();
+                                app.install_dialog = Some(app::InstallDialogState::EnterPath { input: new_inp });
+                            }
+                            KeyCode::Char(c) => {
+                                let mut new_inp = input.clone();
+                                new_inp.push(c);
+                                app.install_dialog = Some(app::InstallDialogState::EnterPath { input: new_inp });
+                            }
+                            _ => {}
+                        },
+                    }
+                    continue;
+                }
+
                 match app.input_mode {
                     InputMode::Normal => match key.code {
                         KeyCode::Char('q') => {
@@ -334,7 +444,11 @@ fn main_loop(
                             };
 
                             if let Some(action) = matching_action {
-                                app.execute_action(&action);
+                                if action.id == "zapret-install" || (action.id == "zapret-update" && !app.is_zapret_installed()) {
+                                    app.start_zapret_install_dialog();
+                                } else {
+                                    app.execute_action(&action);
+                                }
                             }
                         }
                         _ => {}

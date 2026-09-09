@@ -18,10 +18,12 @@ impl ZapretManager {
         let resolved_path = config.get_resolved_path();
         match resolved_path {
             Some(ref path) => {
+                out.push_str("📌 Статус установки:  🟢 Установлен на этом компьютере\n");
                 out.push_str(&format!("📁 Папка программы:   {}\n", path.display()));
             }
             None => {
-                out.push_str("📁 Папка программы:   [НЕ УСТАНОВЛЕНА НА ЭТОМ ПК]\n");
+                out.push_str("📌 Статус установки:  🔴 НЕ УСТАНОВЛЕН НА ЭТОМ ПК\n");
+                out.push_str("📁 Папка программы:   [Не найдена]\n");
             }
         }
 
@@ -45,10 +47,11 @@ impl ZapretManager {
         out.push_str(&format!("📌 Локальная версия:  {}\n", local_version));
 
         if resolved_path.is_none() {
-            out.push_str("\n💡 Zapret пока не обнаружен на этом компьютере.\n");
-            out.push_str("   Вы можете установить его в один клик:\n");
-            out.push_str("   Нажмите [u] ('Обновить / Установить Zapret') — программа автоматически\n");
-            out.push_str("   скачает последнюю версию с GitHub и распакует в C:\\zapret!\n");
+            out.push_str("\n💡 Zapret пока не установлен на этом компьютере.\n");
+            out.push_str("   Для установки запустите команду 'dark-cli zapret install' или\n");
+            out.push_str("   нажмите [u] в меню TUI. Программа предложит два варианта:\n");
+            out.push_str("     [1] Установить в папку по умолчанию (C:\\zapret)\n");
+            out.push_str("     [2] Выбрать свою папку\n");
         }
 
         // 5. Проверка последнего релиза на GitHub
@@ -123,16 +126,70 @@ impl ZapretManager {
         Ok(report)
     }
 
-    /// Обновить папку Zapret или установить с нуля, если не найдена
-    pub fn update(config: &ZapretConfig, force: bool) -> Result<String, String> {
-        let is_new_install = config.get_resolved_path().is_none();
-        let zapret_dir = config.get_resolved_path().unwrap_or_else(|| {
-            PathBuf::from("C:\\zapret")
-        });
+    /// Получить краткую сводку об установке (установлен ли, путь, версия)
+    pub fn get_install_summary(config: &ZapretConfig) -> (bool, Option<PathBuf>, Option<String>) {
+        let path = config.get_resolved_path();
+        let is_installed = path.is_some();
+        let version = path.as_ref().and_then(|p| Self::get_local_version(p));
+        (is_installed, path, version)
+    }
+
+    /// Запросить у пользователя выбор места установки (для CLI режима)
+    pub fn prompt_install_path(default_path: &str) -> Result<PathBuf, String> {
+        use std::io::{self, Write};
+
+        println!("\n====================================================");
+        println!("             УСТАНОВКА FLOWSEAL ZAPRET              ");
+        println!("====================================================");
+        println!("Куда вы хотите установить Zapret?");
+        println!("  [1] В папку по умолчанию ({})", default_path);
+        println!("  [2] Выбрать другую папку (указать свой путь)");
+        print!("\nВыберите вариант [1/2] (по умолчанию 1): ");
+        let _ = io::stdout().flush();
+
+        let mut input = String::new();
+        io::stdin()
+            .read_line(&mut input)
+            .map_err(|e| format!("Ошибка ввода: {}", e))?;
+
+        let choice = input.trim();
+        if choice == "2" {
+            print!("Введите полный путь к папке для установки Zapret: ");
+            let _ = io::stdout().flush();
+
+            let mut custom_path = String::new();
+            io::stdin()
+                .read_line(&mut custom_path)
+                .map_err(|e| format!("Ошибка ввода: {}", e))?;
+
+            let trimmed = custom_path.trim().trim_matches('"');
+            if trimmed.is_empty() {
+                println!("Путь не введен. Будет использована папка по умолчанию: {}", default_path);
+                Ok(PathBuf::from(default_path))
+            } else {
+                let p = PathBuf::from(trimmed);
+                println!("Выбрана папка: {}", p.display());
+                Ok(p)
+            }
+        } else {
+            println!("Выбрана папка по умолчанию: {}", default_path);
+            Ok(PathBuf::from(default_path))
+        }
+    }
+
+    /// Обновить папку Zapret или установить с нуля
+    pub fn update(config: &ZapretConfig, target_path: Option<&Path>, force: bool) -> Result<String, String> {
+        let zapret_dir = if let Some(tp) = target_path {
+            tp.to_path_buf()
+        } else {
+            config.get_resolved_path().unwrap_or_else(|| PathBuf::from("C:\\zapret"))
+        };
+
+        let is_new_install = !zapret_dir.exists() || !zapret_dir.join("service.bat").exists();
 
         let mut log = String::new();
         if is_new_install {
-            log.push_str("⚡ Zapret не найден на компьютере. Выполняется чистая установка с GitHub в C:\\zapret...\n");
+            log.push_str(&format!("⚡ Выполняется чистая установка Zapret с GitHub в {}...\n", zapret_dir.display()));
             let _ = fs::create_dir_all(&zapret_dir);
         }
 

@@ -8,7 +8,7 @@
 
 # --- Настройки Zapret (Flowseal) ---
 [zapret]
-path = "S:\\zapret"
+path = "C:\\zapret"
 service_name = "zapret"
 github_repo = "Flowseal/zapret-discord-youtube"
 
@@ -50,11 +50,19 @@ shortcut = "r"
 
 [[actions]]
 id = "zapret-update"
-name = "Обновить Zapret"
+name = "Обновить / Установить Zapret"
 description = "Скачать последний релиз с GitHub, сохранить списки пользователей, обновить файлы и запустить"
 category = "Zapret"
 command = "dark-cli zapret update"
 shortcut = "u"
+
+[[actions]]
+id = "zapret-install"
+name = "Установить / Выбрать папку"
+description = "Выбрать папку для установки Zapret (по умолчанию C:\\zapret или указать свой путь)"
+category = "Zapret"
+command = "dark-cli zapret install"
+shortcut = "i"
 
 [[actions]]
 id = "zapret-open"

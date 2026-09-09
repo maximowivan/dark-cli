@@ -39,14 +39,24 @@ pub fn render_actions_view(f: &mut Frame, app: &App, area: Rect) {
                         Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
                     };
 
-                    let line = Line::from(vec![
+                    let mut line_spans = vec![
                         Span::styled(prefix, if is_selected { Style::default().fg(Theme::PRIMARY) } else { Style::default() }),
                         Span::styled(icon, Style::default().fg(Color::Yellow)),
-                        Span::styled(format!("{:<20} ", name), folder_name_style),
-                        Span::styled(format!("({} действий)", count), Style::default().fg(Theme::MUTED)),
-                        Span::styled("  →", Style::default().fg(Theme::PRIMARY)),
-                    ]);
-                    ListItem::new(line)
+                        Span::styled(format!("{:<15} ", name), folder_name_style),
+                    ];
+
+                    if name.eq_ignore_ascii_case("zapret") {
+                        if app.is_zapret_installed() {
+                            line_spans.push(Span::styled("[🟢 Установлен] ", Style::default().fg(Color::Green)));
+                        } else {
+                            line_spans.push(Span::styled("[🔴 Не установлен] ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)));
+                        }
+                    }
+
+                    line_spans.push(Span::styled(format!("({} действий)", count), Style::default().fg(Theme::MUTED)));
+                    line_spans.push(Span::styled("  →", Style::default().fg(Theme::PRIMARY)));
+
+                    ListItem::new(Line::from(line_spans))
                 }
                 ViewItem::Back => {
                     let line = Line::from(vec![
@@ -79,8 +89,15 @@ pub fn render_actions_view(f: &mut Frame, app: &App, area: Rect) {
                         spans.push(Span::styled(format!("{:<10} ", format!("[{}]", action.category)), cat_style));
                     }
 
+                    // Dynamically name install action if not installed
+                    let display_name = if action.id == "zapret-update" && !app.is_zapret_installed() {
+                        "Установить Zapret"
+                    } else {
+                        &action.name
+                    };
+
                     spans.push(Span::styled(
-                        format!("{:<22} ", action.name),
+                        format!("{:<22} ", display_name),
                         if is_selected { Theme::selected_item() } else { Style::default().fg(Color::White) },
                     ));
                     spans.push(shortcut_span);
@@ -95,7 +112,15 @@ pub fn render_actions_view(f: &mut Frame, app: &App, area: Rect) {
     let title_text = if !app.input_buffer.is_empty() {
         format!(" 🔍 Результаты поиска ({}) ", items.len())
     } else if let Some(ref folder) = app.current_folder {
-        format!(" 📁 Главное меню / {} ({}) ", folder, items.len().saturating_sub(1))
+        if folder.eq_ignore_ascii_case("zapret") {
+            if let Some(p) = app.get_zapret_path() {
+                format!(" 📁 Главное меню / Zapret [🟢 {}] ({}) ", p.display(), items.len().saturating_sub(1))
+            } else {
+                format!(" 📁 Главное меню / Zapret [🔴 Не установлен] ({}) ", items.len().saturating_sub(1))
+            }
+        } else {
+            format!(" 📁 Главное меню / {} ({}) ", folder, items.len().saturating_sub(1))
+        }
     } else {
         format!(" 📁 Главное меню (папок: {}) ", items.len())
     };
@@ -128,11 +153,47 @@ pub fn render_actions_view(f: &mut Frame, app: &App, area: Rect) {
                         Span::styled("Кол-во команд: ", Style::default().fg(Theme::MUTED)),
                         Span::styled(format!("{}", count), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
                     ]),
-                    Line::from(""),
-                    Line::from(vec![
-                        Span::styled("Содержимое папки:", Style::default().fg(Theme::PRIMARY).add_modifier(Modifier::BOLD)),
-                    ]),
                 ];
+
+                if name.eq_ignore_ascii_case("zapret") {
+                    lines.push(Line::from(""));
+                    lines.push(Line::from(vec![
+                        Span::styled("─── СТАТУС УСТАНОВКИ ZAPRET ───", Style::default().fg(Theme::PRIMARY).add_modifier(Modifier::BOLD)),
+                    ]));
+                    let (is_installed, path, version) = app.get_zapret_summary();
+                    if is_installed {
+                        lines.push(Line::from(vec![
+                            Span::styled("Статус:        ", Style::default().fg(Theme::MUTED)),
+                            Span::styled("🟢 Установлен на этом ПК", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+                        ]));
+                        if let Some(p) = path {
+                            lines.push(Line::from(vec![
+                                Span::styled("Папка:         ", Style::default().fg(Theme::MUTED)),
+                                Span::styled(p.display().to_string(), Style::default().fg(Color::Cyan)),
+                            ]));
+                        }
+                        if let Some(v) = version {
+                            lines.push(Line::from(vec![
+                                Span::styled("Версия:        ", Style::default().fg(Theme::MUTED)),
+                                Span::styled(v, Style::default().fg(Color::White)),
+                            ]));
+                        }
+                    } else {
+                        lines.push(Line::from(vec![
+                            Span::styled("Статус:        ", Style::default().fg(Theme::MUTED)),
+                            Span::styled("🔴 НЕ УСТАНОВЛЕН НА ЭТОМ ПК", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+                        ]));
+                        lines.push(Line::from(vec![
+                            Span::styled("Действие:      ", Style::default().fg(Theme::MUTED)),
+                            Span::styled("Нажмите [u] или выберите установку (в C:\\zapret или свою папку)", Style::default().fg(Color::Yellow)),
+                        ]));
+                    }
+                }
+
+                lines.push(Line::from(""));
+                lines.push(Line::from(vec![
+                    Span::styled("Содержимое папки:", Style::default().fg(Theme::PRIMARY).add_modifier(Modifier::BOLD)),
+                ]));
 
                 for action in app.config.actions.iter().filter(|a| a.category.eq_ignore_ascii_case(name)).take(6) {
                     let sc = action.shortcut.as_ref().map(|s| format!(" [{}]", s)).unwrap_or_default();
@@ -197,7 +258,7 @@ pub fn render_actions_view(f: &mut Frame, app: &App, area: Rect) {
                 let sc_text = action.shortcut.as_deref().unwrap_or("Нет");
                 let cwd_text = action.cwd.as_deref().unwrap_or("Текущая папка");
 
-                let lines = vec![
+                let mut lines = vec![
                     Line::from(vec![
                         Span::styled("Название:     ", Style::default().fg(Theme::MUTED)),
                         Span::styled(&action.name, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
@@ -232,7 +293,32 @@ pub fn render_actions_view(f: &mut Frame, app: &App, area: Rect) {
                     Line::from(vec![
                         Span::styled(format!("  {}", action.description), Style::default().fg(Color::White)),
                     ]),
-                    Line::from(""),
+                ];
+
+                if action.category.eq_ignore_ascii_case("zapret") {
+                    lines.push(Line::from(""));
+                    lines.push(Line::from(vec![
+                        Span::styled("─── СТАТУС ZAPRET ───", Style::default().fg(Theme::PRIMARY).add_modifier(Modifier::BOLD)),
+                    ]));
+                    if let Some(p) = app.get_zapret_path() {
+                        lines.push(Line::from(vec![
+                            Span::styled("Установка:    ", Style::default().fg(Theme::MUTED)),
+                            Span::styled(format!("🟢 Установлен ({})", p.display()), Style::default().fg(Color::Green)),
+                        ]));
+                    } else {
+                        lines.push(Line::from(vec![
+                            Span::styled("Установка:    ", Style::default().fg(Theme::MUTED)),
+                            Span::styled("🔴 Не установлен на этом ПК", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+                        ]));
+                        lines.push(Line::from(vec![
+                            Span::styled("Подсказка:    ", Style::default().fg(Theme::MUTED)),
+                            Span::styled("При запуске будет предложено выбрать папку установки", Style::default().fg(Color::Yellow)),
+                        ]));
+                    }
+                }
+
+                lines.push(Line::from(""));
+                lines.extend(vec![
                     Line::from(vec![
                         Span::styled("─── Быстрый запуск ───", Style::default().fg(Theme::MUTED)),
                     ]),
@@ -246,7 +332,7 @@ pub fn render_actions_view(f: &mut Frame, app: &App, area: Rect) {
                         Span::styled("[Esc] / [←]", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
                         Span::styled(" для возврата в список папок", Style::default().fg(Theme::MUTED)),
                     ]),
-                ];
+                ]);
 
                 let detail_p = Paragraph::new(lines).block(detail_block).wrap(Wrap { trim: false });
                 f.render_widget(detail_p, chunks[1]);

@@ -20,6 +20,12 @@ pub enum InputMode {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub enum InstallDialogState {
+    ChooseOption { selected: usize }, // 0: C:\zapret, 1: Custom path
+    EnterPath { input: String },
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum ViewItem<'a> {
     Back,
     Folder { name: String, count: usize },
@@ -41,6 +47,7 @@ pub struct App {
     pub history: Vec<ExecutionResult>,
     pub status_message: Option<(String, bool)>,
     pub should_quit: bool,
+    pub install_dialog: Option<InstallDialogState>,
     matcher: SkimMatcherV2,
 }
 
@@ -61,6 +68,7 @@ impl App {
             history: Vec::new(),
             status_message: Some(("Готов к работе. Нажмите [?] для справки.".to_string(), false)),
             should_quit: false,
+            install_dialog: None,
             matcher: SkimMatcherV2::default(),
         }
     }
@@ -138,6 +146,10 @@ impl App {
                 self.go_back();
             }
             Some(ViewItem::Action(action)) => {
+                if action.id == "zapret-install" || (action.id == "zapret-update" && !self.is_zapret_installed()) {
+                    self.start_zapret_install_dialog();
+                    return;
+                }
                 let a = (*action).clone();
                 self.execute_action(&a);
             }
@@ -145,6 +157,49 @@ impl App {
                 self.set_status("Команда не найдена", true);
             }
         }
+    }
+
+    pub fn is_zapret_installed(&self) -> bool {
+        self.config.zapret.as_ref().map(|z| z.is_installed()).unwrap_or(false)
+            || crate::config::ZapretConfig::default().is_installed()
+    }
+
+    pub fn get_zapret_path(&self) -> Option<PathBuf> {
+        self.config.zapret.as_ref().and_then(|z| z.get_resolved_path())
+            .or_else(|| crate::config::ZapretConfig::default().get_resolved_path())
+    }
+
+    pub fn get_zapret_summary(&self) -> (bool, Option<PathBuf>, Option<String>) {
+        let default_cfg = crate::config::ZapretConfig::default();
+        let cfg = self.config.zapret.as_ref().unwrap_or(&default_cfg);
+        crate::zapret::ZapretManager::get_install_summary(cfg)
+    }
+
+    pub fn start_zapret_install_dialog(&mut self) {
+        self.install_dialog = Some(InstallDialogState::ChooseOption { selected: 0 });
+    }
+
+    pub fn confirm_install_path(&mut self, chosen_path: &str) {
+        self.install_dialog = None;
+        let p = chosen_path.trim().trim_matches('"');
+        let target_str = if p.is_empty() { "C:\\zapret" } else { p };
+
+        // Save path to config
+        self.config.set_zapret_path(target_str.to_string());
+        let _ = self.config.save(&self.config_path);
+
+        // Run installation command
+        let action = ActionItem {
+            id: "zapret-install-run".to_string(),
+            name: "Установка Zapret".to_string(),
+            description: format!("Установка Zapret в {}", target_str),
+            category: "Zapret".to_string(),
+            command: format!("dark-cli zapret update --force --path \"{}\"", target_str),
+            cwd: None,
+            shortcut: None,
+            env: None,
+        };
+        self.execute_action(&action);
     }
 
     pub fn execute_selected_action(&mut self) {
@@ -333,7 +388,7 @@ mod tests {
 
     fn create_test_app() -> App {
         let config = AppConfig::default_with_samples();
-        App::new(config, PathBuf::from("config.toml"))
+        App::new(config, std::env::temp_dir().join("dark_cli_test_config.toml"))
     }
 
     #[test]
@@ -401,6 +456,19 @@ mod tests {
         app.selected_action_idx = 0;
         app.enter_selected();
         assert!(app.current_folder.is_none());
+    }
+
+    #[test]
+    fn test_install_dialog_lifecycle() {
+        let mut app = create_test_app();
+        assert!(app.install_dialog.is_none());
+
+        app.start_zapret_install_dialog();
+        assert_eq!(app.install_dialog, Some(InstallDialogState::ChooseOption { selected: 0 }));
+
+        app.confirm_install_path("C:\\custom_zapret");
+        assert!(app.install_dialog.is_none());
+        assert_eq!(app.config.zapret.as_ref().and_then(|z| z.path.as_deref()), Some("C:\\custom_zapret"));
     }
 
     #[test]
