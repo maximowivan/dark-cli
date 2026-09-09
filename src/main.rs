@@ -4,7 +4,7 @@ mod executor;
 mod ui;
 mod zapret;
 
-use app::{App, InputMode, Tab};
+use app::{App, InputMode, Tab, ViewItem};
 use clap::{Parser, Subcommand};
 use config::AppConfig;
 use crossterm::{
@@ -271,12 +271,15 @@ fn main_loop(
                         KeyCode::BackTab => app.prev_tab(),
                         KeyCode::Right | KeyCode::Char('l') => {
                             if app.active_tab == Tab::Actions {
-                                app.next_category();
+                                let items = app.current_items();
+                                if let Some(ViewItem::Folder { .. }) = items.get(app.selected_action_idx) {
+                                    app.enter_selected();
+                                }
                             }
                         }
-                        KeyCode::Left | KeyCode::Char('h') => {
+                        KeyCode::Left | KeyCode::Char('h') | KeyCode::Backspace | KeyCode::Esc => {
                             if app.active_tab == Tab::Actions {
-                                app.prev_category();
+                                app.go_back();
                             }
                         }
                         KeyCode::Down | KeyCode::Char('j') => {
@@ -309,15 +312,26 @@ fn main_loop(
                         }
                         KeyCode::Enter => {
                             if app.active_tab == Tab::Actions {
-                                app.execute_selected_action();
+                                app.enter_selected();
                             }
                         }
                         KeyCode::Char(c) => {
-                            // Check single-key shortcuts configured in actions (e.g. 'c' for cargo check)
                             let c_str = c.to_string();
-                            let matching_action = app.config.actions.iter().find(|a| {
-                                a.shortcut.as_ref().map(|s| s.eq_ignore_ascii_case(&c_str)).unwrap_or(false)
-                            }).cloned();
+                            let matching_action = if let Some(ref current_cat) = app.current_folder {
+                                app.config.actions.iter()
+                                    .filter(|a| a.category.eq_ignore_ascii_case(current_cat))
+                                    .find(|a| a.shortcut.as_ref().map(|s| s.eq_ignore_ascii_case(&c_str)).unwrap_or(false))
+                                    .or_else(|| {
+                                        app.config.actions.iter().find(|a| {
+                                            a.shortcut.as_ref().map(|s| s.eq_ignore_ascii_case(&c_str)).unwrap_or(false)
+                                        })
+                                    })
+                                    .cloned()
+                            } else {
+                                app.config.actions.iter().find(|a| {
+                                    a.shortcut.as_ref().map(|s| s.eq_ignore_ascii_case(&c_str)).unwrap_or(false)
+                                }).cloned()
+                            };
 
                             if let Some(action) = matching_action {
                                 app.execute_action(&action);

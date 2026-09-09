@@ -19,13 +19,20 @@ pub enum InputMode {
     PaletteSearch,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum ViewItem<'a> {
+    Back,
+    Folder { name: String, count: usize },
+    Action(&'a ActionItem),
+}
+
 pub struct App {
     pub config: AppConfig,
     pub config_path: PathBuf,
     pub active_tab: Tab,
     pub input_mode: InputMode,
     pub input_buffer: String,
-    pub selected_category_idx: usize,
+    pub current_folder: Option<String>,
     pub selected_action_idx: usize,
     pub palette_selected_idx: usize,
     pub output_scroll: u16,
@@ -45,7 +52,7 @@ impl App {
             active_tab: Tab::Actions,
             input_mode: InputMode::Normal,
             input_buffer: String::new(),
-            selected_category_idx: 0,
+            current_folder: None,
             selected_action_idx: 0,
             palette_selected_idx: 0,
             output_scroll: 0,
@@ -59,88 +66,123 @@ impl App {
     }
 
     pub fn categories(&self) -> Vec<String> {
-        let mut cats = vec!["Все".to_string()];
+        let mut cats = Vec::new();
         for action in &self.config.actions {
-            if !cats.iter().any(|c| c.eq_ignore_ascii_case(&action.category)) {
+            if !cats.iter().any(|c: &String| c.eq_ignore_ascii_case(&action.category)) {
                 cats.push(action.category.clone());
             }
         }
         cats
     }
 
-    pub fn next_category(&mut self) {
-        let cats = self.categories();
-        if !cats.is_empty() {
-            self.selected_category_idx = (self.selected_category_idx + 1) % cats.len();
-            self.selected_action_idx = 0;
+    pub fn current_items(&self) -> Vec<ViewItem<'_>> {
+        // Поиск по всем действиям сразу, если введен поисковый запрос
+        if !self.input_buffer.is_empty() {
+            let query = &self.input_buffer;
+            let mut matches: Vec<(i64, &ActionItem)> = self
+                .config
+                .actions
+                .iter()
+                .filter_map(|item| {
+                    let target = format!("{} {} {} {}", item.name, item.id, item.category, item.description);
+                    self.matcher.fuzzy_match(&target, query).map(|score| (score, item))
+                })
+                .collect();
+            matches.sort_by(|a, b| b.0.cmp(&a.0));
+            return matches.into_iter().map(|(_, item)| ViewItem::Action(item)).collect();
+        }
+
+        // Вложенные папки
+        match self.current_folder {
+            None => {
+                // Корень: отображаем список папок категорий
+                let mut items = Vec::new();
+                for cat in self.categories() {
+                    let count = self.config.actions.iter().filter(|a| a.category.eq_ignore_ascii_case(&cat)).count();
+                    items.push(ViewItem::Folder { name: cat, count });
+                }
+                items
+            }
+            Some(ref cat) => {
+                // Внутри папки: кнопка возврата + действия этой категории
+                let mut items = vec![ViewItem::Back];
+                for action in &self.config.actions {
+                    if action.category.eq_ignore_ascii_case(cat) {
+                        items.push(ViewItem::Action(action));
+                    }
+                }
+                items
+            }
         }
     }
 
-    pub fn prev_category(&mut self) {
-        let cats = self.categories();
-        if !cats.is_empty() {
-            if self.selected_category_idx == 0 {
-                self.selected_category_idx = cats.len() - 1;
-            } else {
-                self.selected_category_idx -= 1;
+    pub fn enter_selected(&mut self) {
+        if self.input_mode == InputMode::PaletteSearch {
+            let filtered = self.filtered_actions();
+            if let Some((_, action)) = filtered.get(self.palette_selected_idx) {
+                let a = (*action).clone();
+                self.execute_action(&a);
             }
-            self.selected_action_idx = 0;
+            self.input_mode = InputMode::Normal;
+            self.input_buffer.clear();
+            return;
+        }
+
+        let items = self.current_items();
+        match items.get(self.selected_action_idx) {
+            Some(ViewItem::Folder { name, .. }) => {
+                self.current_folder = Some(name.clone());
+                self.selected_action_idx = 0;
+            }
+            Some(ViewItem::Back) => {
+                self.go_back();
+            }
+            Some(ViewItem::Action(action)) => {
+                let a = (*action).clone();
+                self.execute_action(&a);
+            }
+            None => {
+                self.set_status("Команда не найдена", true);
+            }
+        }
+    }
+
+    pub fn execute_selected_action(&mut self) {
+        self.enter_selected();
+    }
+
+    pub fn go_back(&mut self) -> bool {
+        if let Some(folder) = self.current_folder.take() {
+            if let Some(idx) = self.categories().iter().position(|c| c.eq_ignore_ascii_case(&folder)) {
+                self.selected_action_idx = idx;
+            } else {
+                self.selected_action_idx = 0;
+            }
+            true
+        } else {
+            false
         }
     }
 
     pub fn filtered_actions(&self) -> Vec<(usize, &ActionItem)> {
-        let categories = self.categories();
-        let selected_cat = if self.selected_category_idx > 0 && self.selected_category_idx < categories.len() {
-            Some(&categories[self.selected_category_idx])
-        } else {
-            None
-        };
-
-        // 1. Filter by category
-        let base_iter = self.config.actions.iter().enumerate().filter(|(_, item)| {
-            if let Some(cat) = selected_cat {
-                item.category.eq_ignore_ascii_case(cat)
-            } else {
-                true
-            }
-        });
-
-        // 2. Filter by search query if any
         if self.input_buffer.is_empty() {
-            return base_iter.collect();
+            return self.config.actions.iter().enumerate().collect();
         }
 
         let query = &self.input_buffer;
-        let mut matches: Vec<(i64, usize, &ActionItem)> = base_iter
+        let mut matches: Vec<(i64, usize, &ActionItem)> = self
+            .config
+            .actions
+            .iter()
+            .enumerate()
             .filter_map(|(idx, item)| {
                 let target = format!("{} {} {} {}", item.name, item.id, item.category, item.description);
                 self.matcher.fuzzy_match(&target, query).map(|score| (score, idx, item))
             })
             .collect();
 
-        // Sort by fuzzy match score descending
         matches.sort_by(|a, b| b.0.cmp(&a.0));
         matches.into_iter().map(|(_, idx, item)| (idx, item)).collect()
-    }
-
-    pub fn execute_selected_action(&mut self) {
-        let filtered = self.filtered_actions();
-        let action = if self.input_mode == InputMode::PaletteSearch {
-            filtered.get(self.palette_selected_idx).map(|(_, a)| (*a).clone())
-        } else {
-            filtered.get(self.selected_action_idx).map(|(_, a)| (*a).clone())
-        };
-
-        if let Some(action) = action {
-            self.execute_action(&action);
-        } else {
-            self.set_status("Команда не найдена", true);
-        }
-
-        if self.input_mode == InputMode::PaletteSearch {
-            self.input_mode = InputMode::Normal;
-            self.input_buffer.clear();
-        }
     }
 
     pub fn execute_action(&mut self, action: &ActionItem) {
@@ -231,14 +273,14 @@ impl App {
     }
 
     pub fn next_action(&mut self) {
-        let count = self.filtered_actions().len();
+        let count = self.current_items().len();
         if count > 0 {
             self.selected_action_idx = (self.selected_action_idx + 1) % count;
         }
     }
 
     pub fn prev_action(&mut self) {
-        let count = self.filtered_actions().len();
+        let count = self.current_items().len();
         if count > 0 {
             if self.selected_action_idx == 0 {
                 self.selected_action_idx = count - 1;
@@ -318,7 +360,7 @@ mod tests {
     #[test]
     fn test_action_navigation() {
         let mut app = create_test_app();
-        let total = app.config.actions.len();
+        let total = app.current_items().len();
         assert!(total > 0);
 
         assert_eq!(app.selected_action_idx, 0);
@@ -331,6 +373,34 @@ mod tests {
         // Wrap around to the end
         app.prev_action();
         assert_eq!(app.selected_action_idx, total - 1);
+    }
+
+    #[test]
+    fn test_folder_navigation() {
+        let mut app = create_test_app();
+        assert!(app.current_folder.is_none());
+
+        // In root, items are folders
+        let root_items = app.current_items();
+        assert!(!root_items.is_empty());
+        match &root_items[0] {
+            ViewItem::Folder { name, count } => {
+                assert!(*count > 0);
+                let first_folder = name.clone();
+                app.enter_selected();
+                assert_eq!(app.current_folder.as_deref(), Some(first_folder.as_str()));
+            }
+            _ => panic!("Expected ViewItem::Folder in root"),
+        }
+
+        // Inside folder, first item is Back
+        let folder_items = app.current_items();
+        assert_eq!(folder_items[0], ViewItem::Back);
+
+        // Enter on Back goes back to root
+        app.selected_action_idx = 0;
+        app.enter_selected();
+        assert!(app.current_folder.is_none());
     }
 
     #[test]

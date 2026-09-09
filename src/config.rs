@@ -9,7 +9,7 @@ pub struct Settings {
     pub shell: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ActionItem {
     pub id: String,
     pub name: String,
