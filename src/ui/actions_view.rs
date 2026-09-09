@@ -60,8 +60,9 @@ pub fn render_actions_view(f: &mut Frame, app: &App, area: Rect) {
                             line_spans.push(Span::styled("[🔴 Не установлен] ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)));
                         }
                     } else if name.to_lowercase().contains("автозагруз") || name.to_lowercase().contains("трей") {
-                        let (dark_auto, tg_auto, _) = app.get_system_autorun_summary();
-                        if dark_auto || tg_auto {
+                        let (dark_auto, tg_auto, zap_auto) = app.get_system_autorun_summary();
+                        let zap_auto_on = zap_auto.contains("AUTO_START") || zap_auto.contains("Автозапуск");
+                        if dark_auto || tg_auto || zap_auto_on {
                             line_spans.push(Span::styled("[🟢 Автозапуск] ", Style::default().fg(Color::Green)));
                         } else {
                             line_spans.push(Span::styled("[⚪ Обычный] ", Style::default().fg(Theme::MUTED)));

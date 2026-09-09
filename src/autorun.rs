@@ -179,11 +179,63 @@ impl AutorunManager {
     pub fn get_zapret_service_autorun() -> String {
         #[cfg(target_os = "windows")]
         {
-            let output = Command::new("sc")
-                .args(["qc", "zapret"])
+            // 1. Проверяем регистрацию службы в системном реестре HKLM (наиболее надежный способ,
+            // не подверженный ошибке RPC 1734 при длинных параметрах ImagePath)
+            let reg_output = Command::new("reg")
+                .args(["query", "HKLM\\SYSTEM\\CurrentControlSet\\Services\\zapret"])
                 .output();
 
-            if let Ok(out) = output {
+            if let Ok(out) = reg_output {
+                if out.status.success() {
+                    let text = String::from_utf8_lossy(&out.stdout);
+
+                    // Проверяем текущее состояние работы службы через sc query zapret
+                    let is_running = if let Ok(q) = Command::new("sc").args(["query", "zapret"]).output() {
+                        let q_text = String::from_utf8_lossy(&q.stdout).to_uppercase();
+                        q_text.contains("RUNNING")
+                    } else {
+                        false
+                    };
+
+                    let run_str = if is_running { "🟢 Работает" } else { "🔴 Остановлена" };
+
+                    // Получаем сохраненную стратегию
+                    let strategy = text
+                        .lines()
+                        .find(|l| l.contains("zapret-discord-youtube"))
+                        .and_then(|l| l.split("REG_SZ").nth(1))
+                        .map(|s| s.trim())
+                        .unwrap_or("");
+
+                    let strat_str = if !strategy.is_empty() {
+                        format!(" [{}]", strategy)
+                    } else {
+                        String::new()
+                    };
+
+                    // Значение параметра Start (0x2 = AUTO_START, 0x3 = DEMAND_START, 0x4 = DISABLED)
+                    let start_val = text
+                        .lines()
+                        .find(|l| {
+                            let trimmed = l.trim_start();
+                            trimmed.starts_with("Start ") || trimmed.starts_with("Start\t")
+                        })
+                        .and_then(|l| l.split_whitespace().last())
+                        .unwrap_or("");
+
+                    let type_str = match start_val {
+                        "0x2" => "🟢 Автозапуск Windows (AUTO_START)",
+                        "0x3" => "🟡 Вручную (DEMAND_START)",
+                        "0x4" => "🔴 Отключена (DISABLED)",
+                        _ => "🟢 Зарегистрирована",
+                    };
+
+                    return format!("{} • {}{}", type_str, run_str, strat_str);
+                }
+            }
+
+            // 2. Резервный вариант через sc qc
+            if let Ok(out) = Command::new("sc").args(["qc", "zapret"]).output() {
                 if out.status.success() {
                     let text = String::from_utf8_lossy(&out.stdout).to_uppercase();
                     if text.contains("AUTO_START") {
@@ -217,14 +269,14 @@ impl AutorunManager {
         let zapret_auto = Self::get_zapret_service_autorun();
 
         let mut out = String::new();
-        out.push_str("╔════════════════════════════════════════════════════════════════════════════════╗\n");
-        out.push_str("║                 СТАТУС СИСТЕМНОЙ ИНТЕГРАЦИИ И АВТОЗАГРУЗКИ                     ║\n");
-        out.push_str("╠════════════════════════════════════════════════════════════════════════════════╣\n");
-        out.push_str(&format!("║ 🖥 Dark-CLI:               {:<52} ║\n", dark_cli_auto));
-        out.push_str(&format!("║ ✈️ Flowseal TG WS Proxy:   {:<52} ║\n", tg_auto));
-        out.push_str(&format!("║ ⚡ Служба Zapret:          {:<52} ║\n", zapret_auto));
-        out.push_str("║ 🔔 Системный трей Windows: 🟢 Активен (иконка в области уведомлений возле часов)║\n");
-        out.push_str("╚════════════════════════════════════════════════════════════════════════════════╝\n\n");
+        out.push_str("───────────────────────────────────────────────────────────────────────────\n");
+        out.push_str("              СТАТУС СИСТЕМНОЙ ИНТЕГРАЦИИ И АВТОЗАГРУЗКИ                   \n");
+        out.push_str("───────────────────────────────────────────────────────────────────────────\n");
+        out.push_str(&format!("  🖥 Dark-CLI:               {}\n", dark_cli_auto));
+        out.push_str(&format!("  ✈️ Flowseal TG WS Proxy:   {}\n", tg_auto));
+        out.push_str(&format!("  ⚡ Служба Zapret:          {}\n", zapret_auto));
+        out.push_str("  🔔 Системный трей Windows: 🟢 Активен (иконка в области уведомлений возле часов)\n");
+        out.push_str("───────────────────────────────────────────────────────────────────────────\n\n");
 
         out.push_str("💡 ПОЛЕЗНЫЕ СОВЕТЫ:\n");
         out.push_str("• Нажмите [h] в главном меню для мгновенного скрытия окна Dark-CLI в трей.\n");
