@@ -1,7 +1,9 @@
 mod app;
+mod autorun;
 mod config;
 mod executor;
 mod self_update;
+mod system_tray;
 mod tg_proxy;
 mod ui;
 mod zapret;
@@ -25,6 +27,10 @@ use zapret::ZapretManager;
 #[command(name = "dark-cli")]
 #[command(about = "Универсальный CLI/TUI лаунчер и диспетчер задач в стиле OpenCode", long_about = None)]
 struct Cli {
+    /// Запустить Dark-CLI свернутым в системный трей
+    #[arg(long)]
+    tray: bool,
+
     /// Отключить автоматическую проверку обновлений при запуске
     #[arg(long, global = true)]
     no_update: bool,
@@ -60,6 +66,29 @@ enum Commands {
         #[command(subcommand)]
         action: TgProxyCommands,
     },
+    /// Управление автозагрузкой Windows и системным треем
+    System {
+        #[command(subcommand)]
+        action: SystemCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum SystemCommands {
+    /// Проверить статус автозагрузки Dark-CLI, TG WS Proxy и службы Zapret
+    Status,
+    /// Свернуть окно Dark-CLI в системный трей возле часов
+    TrayHide,
+    /// Восстановить окно Dark-CLI из системного трея
+    TrayShow,
+    /// Включить автозапуск Dark-CLI при старте Windows (свернутым в трей)
+    AutorunEnable,
+    /// Отключить автозапуск Dark-CLI
+    AutorunDisable,
+    /// Включить автозапуск Flowseal TG WS Proxy в Windows
+    TgAutorunEnable,
+    /// Отключить автозапуск Flowseal TG WS Proxy
+    TgAutorunDisable,
 }
 
 #[derive(Subcommand)]
@@ -494,7 +523,65 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             return Ok(());
         }
+        Some(Commands::System { action }) => {
+            match action {
+                SystemCommands::Status => {
+                    println!("{}", autorun::AutorunManager::get_status_report());
+                }
+                SystemCommands::TrayHide => {
+                    system_tray::window_control::hide_console();
+                    println!("Окно Dark-CLI свернуто в системный трей.");
+                }
+                SystemCommands::TrayShow => {
+                    system_tray::window_control::show_console();
+                    println!("Окно Dark-CLI восстановлено из системного трея.");
+                }
+                SystemCommands::AutorunEnable => {
+                    match autorun::AutorunManager::enable_dark_cli() {
+                        Ok(msg) => println!("{}", msg),
+                        Err(e) => {
+                            eprintln!("Ошибка: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                SystemCommands::AutorunDisable => {
+                    match autorun::AutorunManager::disable_dark_cli() {
+                        Ok(msg) => println!("{}", msg),
+                        Err(e) => {
+                            eprintln!("Ошибка: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                SystemCommands::TgAutorunEnable => {
+                    let tg_path = config.tg_proxy.as_ref().and_then(|t| t.path.as_deref()).map(std::path::Path::new);
+                    match autorun::AutorunManager::enable_tg_proxy(tg_path) {
+                        Ok(msg) => println!("{}", msg),
+                        Err(e) => {
+                            eprintln!("Ошибка: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                SystemCommands::TgAutorunDisable => {
+                    match autorun::AutorunManager::disable_tg_proxy() {
+                        Ok(msg) => println!("{}", msg),
+                        Err(e) => {
+                            eprintln!("Ошибка: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+            }
+            return Ok(());
+        }
         None => {
+            // Если передан флаг --tray, сворачиваем окно в трей сразу при старте
+            if cli.tray {
+                system_tray::window_control::hide_console();
+            }
+
             // Автоматическая проверка обновлений при старте (если не отключена флагом --no-update)
             if !cli.no_update {
                 if self_update::SelfUpdateManager::auto_update_on_startup(self_update::DEFAULT_REPO) {
@@ -511,6 +598,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn run_tui(config: AppConfig, config_path: std::path::PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+    // Инициализация иконки системного трея Windows
+    let _tray = system_tray::TrayManager::init().ok();
     // Setup panic hook to cleanly restore terminal
     let original_hook = panic::take_hook();
     panic::set_hook(Box::new(move |panic_info| {
@@ -668,7 +757,7 @@ fn main_loop(
                                 }
                             }
                         }
-                        KeyCode::Left | KeyCode::Char('h') | KeyCode::Backspace | KeyCode::Esc => {
+                        KeyCode::Left | KeyCode::Backspace | KeyCode::Esc => {
                             if app.active_tab == Tab::Actions {
                                 app.go_back();
                             }
@@ -741,6 +830,14 @@ fn main_loop(
                                     '3' => app.active_tab = Tab::History,
                                     '4' => app.active_tab = Tab::Help,
                                     'r' => app.reload_config(),
+                                    'h' => {
+                                        if app.active_tab == Tab::Actions {
+                                            if !app.go_back() {
+                                                // В главном меню сворачиваем окно в системный трей
+                                                system_tray::window_control::hide_console();
+                                            }
+                                        }
+                                    }
                                     _ => {}
                                 }
                             }

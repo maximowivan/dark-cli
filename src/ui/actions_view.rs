@@ -27,6 +27,7 @@ pub fn render_actions_view(f: &mut Frame, app: &App, area: Rect) {
                     let icon = match name.to_lowercase().as_str() {
                         "zapret" => "📁 ⚡ ",
                         "telegram proxy" | "tg proxy" | "telegram" | "tg-proxy" => "📁 ✈️ ",
+                        "автозагрузка и трей" | "автозагрузка" | "трей" | "autorun" => "📁 🖥️ ",
                         "разработка" | "dev" => "📁 💻 ",
                         "система" | "system" => "📁 🛠 ",
                         "git" => "📁 🌿 ",
@@ -57,6 +58,13 @@ pub fn render_actions_view(f: &mut Frame, app: &App, area: Rect) {
                             line_spans.push(Span::styled("[🟢 Установлен] ", Style::default().fg(Color::Green)));
                         } else {
                             line_spans.push(Span::styled("[🔴 Не установлен] ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)));
+                        }
+                    } else if name.to_lowercase().contains("автозагруз") || name.to_lowercase().contains("трей") {
+                        let (dark_auto, tg_auto, _) = app.get_system_autorun_summary();
+                        if dark_auto || tg_auto {
+                            line_spans.push(Span::styled("[🟢 Автозапуск] ", Style::default().fg(Color::Green)));
+                        } else {
+                            line_spans.push(Span::styled("[⚪ Обычный] ", Style::default().fg(Theme::MUTED)));
                         }
                     }
 
@@ -236,6 +244,34 @@ pub fn render_actions_view(f: &mut Frame, app: &App, area: Rect) {
                             Span::styled("Нажмите [u] для загрузки TgWsProxy_windows.exe с GitHub", Style::default().fg(Color::Yellow)),
                         ]));
                     }
+                } else if name.to_lowercase().contains("автозагруз") || name.to_lowercase().contains("трей") {
+                    lines.push(Line::from(""));
+                    lines.push(Line::from(vec![
+                        Span::styled("─── СИСТЕМА И АВТОЗАГРУЗКА ───", Style::default().fg(Theme::PRIMARY).add_modifier(Modifier::BOLD)),
+                    ]));
+                    let (dark_auto, tg_auto, zap_auto) = app.get_system_autorun_summary();
+                    lines.push(Line::from(vec![
+                        Span::styled("Dark-CLI в трей: ", Style::default().fg(Theme::MUTED)),
+                        Span::styled(
+                            if dark_auto { "🟢 Включен (запуск свернутым)" } else { "⚪ Отключен" },
+                            if dark_auto { Style::default().fg(Color::Green).add_modifier(Modifier::BOLD) } else { Style::default().fg(Theme::MUTED) },
+                        ),
+                    ]));
+                    lines.push(Line::from(vec![
+                        Span::styled("TG WS Proxy:     ", Style::default().fg(Theme::MUTED)),
+                        Span::styled(
+                            if tg_auto { "🟢 Включен (старт в трее)" } else { "⚪ Отключен" },
+                            if tg_auto { Style::default().fg(Color::Green).add_modifier(Modifier::BOLD) } else { Style::default().fg(Theme::MUTED) },
+                        ),
+                    ]));
+                    lines.push(Line::from(vec![
+                        Span::styled("Служба Zapret:   ", Style::default().fg(Theme::MUTED)),
+                        Span::styled(zap_auto, Style::default().fg(Color::Cyan)),
+                    ]));
+                    lines.push(Line::from(vec![
+                        Span::styled("Трей Windows:    ", Style::default().fg(Theme::MUTED)),
+                        Span::styled("🟢 Активен (нажмите [h] чтобы скрыть)", Style::default().fg(Color::Green)),
+                    ]));
                 }
 
                 lines.push(Line::from(""));

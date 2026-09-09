@@ -190,3 +190,55 @@ description = "Проверка наличия обновлений Dark-CLI н�
 category = "Dark-CLI"
 command = "dark-cli self-update"
 shortcut = "u"
+
+# ==========================================================
+# ДЕЙСТВИЯ: АВТОЗАГРУЗКА И СИСТЕМНЫЙ ТРЕЙ
+# ==========================================================
+
+[[actions]]
+id = "sys-status"
+name = "Статус автозагрузки и трея"
+description = "Проверка автозапуска Dark-CLI, TG WS Proxy и системной службы Zapret"
+category = "Автозагрузка и Трей"
+command = "dark-cli system status"
+shortcut = "s"
+
+[[actions]]
+id = "sys-tray-hide"
+name = "Свернуть окно в системный трей"
+description = "Мгновенно скрыть окно консоли в трей возле часов (или нажмите [h] в меню)"
+category = "Автозагрузка и Трей"
+command = "dark-cli system tray-hide"
+shortcut = "h"
+
+[[actions]]
+id = "sys-dark-cli-autorun-enable"
+name = "Включить автозапуск Dark-CLI"
+description = "Запуск Dark-CLI свернутым в системный трей при включении Windows"
+category = "Автозагрузка и Трей"
+command = "dark-cli system autorun-enable"
+shortcut = "1"
+
+[[actions]]
+id = "sys-dark-cli-autorun-disable"
+name = "Отключить автозапуск Dark-CLI"
+description = "Удаление Dark-CLI из автозагрузки Windows"
+category = "Автозагрузка и Трей"
+command = "dark-cli system autorun-disable"
+shortcut = "0"
+
+[[actions]]
+id = "sys-tg-autorun-enable"
+name = "Включить автозапуск TG WS Proxy"
+description = "Автоматический запуск прокси для Telegram в фоне при включении Windows"
+category = "Автозагрузка и Трей"
+command = "dark-cli system tg-autorun-enable"
+shortcut = "2"
+
+[[actions]]
+id = "sys-tg-autorun-disable"
+name = "Отключить автозапуск TG WS Proxy"
+description = "Удаление Flowseal TG WS Proxy из автозагрузки Windows"
+category = "Автозагрузка и Трей"
+command = "dark-cli system tg-autorun-disable"
+shortcut = "9"

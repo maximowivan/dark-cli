@@ -58,6 +58,9 @@ pub struct App {
     pub tg_proxy_version: Option<String>,
     pub tg_proxy_running: bool,
     pub tg_proxy_port: u16,
+    pub dark_cli_autorun: bool,
+    pub tg_proxy_autorun: bool,
+    pub zapret_service_autorun: String,
     pub last_status_refresh: std::time::Instant,
     matcher: SkimMatcherV2,
 }
@@ -90,6 +93,9 @@ impl App {
             tg_proxy_version: None,
             tg_proxy_running: false,
             tg_proxy_port: 1443,
+            dark_cli_autorun: false,
+            tg_proxy_autorun: false,
+            zapret_service_autorun: String::new(),
             last_status_refresh: std::time::Instant::now(),
             matcher: SkimMatcherV2::default(),
         };
@@ -201,8 +207,16 @@ impl App {
         self.tg_proxy_version = summary.version;
         self.tg_proxy_running = summary.is_running;
         self.tg_proxy_port = summary.port;
+        // 3. System & Autorun
+        self.dark_cli_autorun = crate::autorun::AutorunManager::is_dark_cli_enabled();
+        self.tg_proxy_autorun = crate::autorun::AutorunManager::is_tg_proxy_enabled();
+        self.zapret_service_autorun = crate::autorun::AutorunManager::get_zapret_service_autorun();
 
         self.last_status_refresh = std::time::Instant::now();
+    }
+
+    pub fn get_system_autorun_summary(&self) -> (bool, bool, &str) {
+        (self.dark_cli_autorun, self.tg_proxy_autorun, &self.zapret_service_autorun)
     }
 
     pub fn is_zapret_installed(&self) -> bool {
@@ -342,6 +356,10 @@ impl App {
         self.output_scroll = 0;
         self.active_tab = Tab::Output;
         self.refresh_statuses();
+
+        if action.id == "sys-tray-hide" {
+            crate::system_tray::window_control::hide_console();
+        }
     }
 
     pub fn execute_action_by_id(&mut self, id: &str) -> bool {
@@ -565,7 +583,8 @@ mod tests {
             let matches = action.name.to_lowercase().contains("zapret")
                 || action.command.to_lowercase().contains("zapret")
                 || action.category.to_lowercase().contains("zapret")
-                || action.id.to_lowercase().contains("zapret");
+                || action.id.to_lowercase().contains("zapret")
+                || action.description.to_lowercase().contains("zapret");
             assert!(matches);
         }
 
