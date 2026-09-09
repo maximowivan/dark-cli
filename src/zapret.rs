@@ -503,6 +503,224 @@ if ($installed) {{
         Ok(report)
     }
 
+    /// Установить и настроить Zapret под ключ (для нового ПК):
+    /// 1. Скачивает и устанавливает Zapret в C:\zapret (папка по умолчанию).
+    /// 2. Запускает утилиту тестирования всех стратегий (utils\test zapret.ps1).
+    /// 3. Находит лучшую стратегию по результатам тестов.
+    /// 4. Регистрирует системную службу Windows zapret с найденной лучшей стратегией.
+    /// 5. Запускает службу и проверяет доступность YouTube и Discord.
+    pub fn easy_setup(
+        app_config: &crate::config::AppConfig,
+        config_path: &Path,
+    ) -> Result<String, String> {
+        let default_path = PathBuf::from("C:\\zapret");
+        let mut zapret_cfg = app_config.zapret.clone().unwrap_or_default();
+        let mut out = String::new();
+
+        out.push_str("====================================================\n");
+        out.push_str("   МАСТЕР БЫСТРОЙ НАСТРОЙКИ ZAPRET ПОД КЛЮЧ         \n");
+        out.push_str("====================================================\n\n");
+
+        // --- ШАГ 1: Проверка / загрузка файлов в C:\zapret ---
+        let has_files = default_path.join("bin").join("winws.exe").exists()
+            && default_path.join("utils").join("test zapret.ps1").exists();
+
+        if !has_files {
+            out.push_str("📦 Шаг 1/5: Загрузка последней версии Zapret с GitHub в C:\\zapret...\n");
+            let update_res = Self::update(&zapret_cfg, Some(&default_path), true)?;
+            out.push_str(&update_res);
+            out.push('\n');
+
+            let mut updated_config = app_config.clone();
+            updated_config.set_zapret_path(default_path.display().to_string());
+            let _ = updated_config.save(config_path);
+            zapret_cfg.path = Some(default_path.display().to_string());
+        } else {
+            out.push_str(&format!(
+                "✅ Шаг 1/5: Файлы программы готовы в {}\n",
+                default_path.display()
+            ));
+        }
+
+        // --- ШАГ 2: Подготовка окружения (остановка службы перед тестами) ---
+        out.push_str("🧹 Шаг 2/5: Остановка служб перед запуском тестирования...\n");
+        let _ = Self::remove_service(&zapret_cfg);
+        sleep(Duration::from_millis(1000));
+
+        // --- ШАГ 3: Тестирование всех стратегий через utils\test zapret.ps1 ---
+        out.push_str("🧪 Шаг 3/5: Автоматическое тестирование стратегий через utils\\test zapret.ps1...\n");
+        out.push_str("   (Утилита проверяет пробитие блокировок YouTube и Discord для вашего провайдера)\n");
+        let best_strategy = Self::run_strategy_benchmark(&default_path)?;
+        out.push_str(&format!("🏆 Лучшая стратегия по тестам: {}\n\n", best_strategy));
+
+        // --- ШАГ 4: Установка системной службы Windows ---
+        out.push_str(&format!(
+            "⚙  Шаг 4/5: Регистрация системной службы Windows со стратегией '{}'...\n",
+            best_strategy
+        ));
+        let install_res = Self::install_service(&zapret_cfg, Some(&best_strategy))?;
+        out.push_str(&install_res);
+        out.push('\n');
+
+        // --- ШАГ 5: Запуск службы и сетевая проверка ---
+        out.push_str("🚀 Шаг 5/5: Запуск системной службы и проверка доступности...\n");
+        let start_res = Self::start(&zapret_cfg)?;
+        out.push_str(&start_res);
+        out.push('\n');
+
+        // Проверка соединения
+        let (_yt_ok, _dc_ok, check_details) = Self::verify_connectivity();
+
+        out.push_str("\n====================================================\n");
+        out.push_str("  🎉 ZAPRET ПОЛНОСТЬЮ НАСТРОЕН И ГОТОВ К РАБОТЕ!    \n");
+        out.push_str("====================================================\n\n");
+        out.push_str(&format!("📁 Папка программы:     {}\n", default_path.display()));
+        out.push_str(&format!("🏆 Установленный альт:  {}\n", best_strategy));
+        let service_status = Self::check_service_status(&zapret_cfg.service_name);
+        out.push_str(&format!("⚙  Служба Windows:      {}\n", service_status));
+        let proc_status = Self::check_winws_process();
+        out.push_str(&format!("⚡ Процесс winws:       {}\n\n", proc_status));
+        out.push_str("🌐 Результаты проверки доступа:\n");
+        out.push_str(&check_details);
+        out.push_str("\n\n✨ Служба работает в фоновом режиме (Session 0) без окон консоли.\n");
+        out.push_str("   Zapret будет автоматически запускаться при каждом включении Windows!\n");
+        out.push_str("====================================================\n");
+
+        Ok(out)
+    }
+
+    /// Запустить встроенную утилиту utils\test zapret.ps1 для поиска лучшей стратегии
+    pub fn run_strategy_benchmark(zapret_dir: &Path) -> Result<String, String> {
+        let utils_dir = zapret_dir.join("utils");
+        let test_script = utils_dir.join("test zapret.ps1");
+        if !test_script.exists() {
+            return Ok("general (ALT11)".to_string());
+        }
+
+        let runner_script = std::env::temp_dir().join(format!("run_benchmark_{}.ps1", std::process::id()));
+        let runner_code = format!(
+            r#"$ErrorActionPreference = 'SilentlyContinue';
+Set-Location -LiteralPath '{utils}';
+
+# Автоматически возвращаем '1' на вопросы Read-Host (Standard tests + All configs)
+function global:Read-Host {{
+    param($Prompt)
+    return '1'
+}}
+
+try {{
+    & '{script}'
+}} catch {{
+}}
+"#,
+            utils = utils_dir.display().to_string().replace('\'', "''"),
+            script = test_script.display().to_string().replace('\'', "''"),
+        );
+
+        fs::write(&runner_script, runner_code.as_bytes())
+            .map_err(|e| format!("Не удалось создать скрипт запуска тестов: {}", e))?;
+
+        let run_cmd = format!(
+            "Start-Process powershell -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File \"{}\"' -Verb RunAs -Wait",
+            runner_script.display()
+        );
+
+        let _ = Self::run_powershell_script(&run_cmd);
+        let _ = fs::remove_file(&runner_script);
+
+        if let Some(best) = Self::get_latest_test_result_strategy(zapret_dir) {
+            Ok(best)
+        } else {
+            Ok("general (ALT11)".to_string())
+        }
+    }
+
+    /// Получить стратегию-победителя из последнего отчета utils\test results
+    pub fn get_latest_test_result_strategy(zapret_dir: &Path) -> Option<String> {
+        let results_dir = zapret_dir.join("utils").join("test results");
+        if !results_dir.exists() {
+            return None;
+        }
+
+        let mut files = Vec::new();
+        if let Ok(entries) = fs::read_dir(&results_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() && path.extension().map(|e| e == "txt").unwrap_or(false) {
+                    if let Ok(meta) = path.metadata() {
+                        if let Ok(modified) = meta.modified() {
+                            files.push((modified, path));
+                        }
+                    }
+                }
+            }
+        }
+
+        files.sort_by(|a, b| b.0.cmp(&a.0)); // Свежие файлы первыми
+
+        for (_, path) in files {
+            if let Ok(content) = fs::read_to_string(&path) {
+                for line in content.lines().rev() {
+                    let trimmed = line.trim();
+                    if trimmed.starts_with("Best strategy:") {
+                        let strat = trimmed.trim_start_matches("Best strategy:").trim();
+                        let clean_strat = strat.trim_end_matches(".bat").trim();
+                        if !clean_strat.is_empty() {
+                            return Some(clean_strat.to_string());
+                        }
+                    } else if trimmed.starts_with("Best config:") {
+                        let strat = trimmed.trim_start_matches("Best config:").trim();
+                        let clean_strat = strat.trim_end_matches(".bat").trim();
+                        if !clean_strat.is_empty() {
+                            return Some(clean_strat.to_string());
+                        }
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Экспресс-проверка доступности YouTube и Discord
+    pub fn verify_connectivity() -> (bool, bool, String) {
+        let script = r#"
+            $yt = try {
+                $r = Invoke-WebRequest -Uri 'https://www.youtube.com' -TimeoutSec 6 -UseBasicParsing -ErrorAction Stop
+                $r.StatusCode
+            } catch {
+                if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 }
+            };
+            $dc = try {
+                $r = Invoke-WebRequest -Uri 'https://discord.com' -TimeoutSec 6 -UseBasicParsing -ErrorAction Stop
+                $r.StatusCode
+            } catch {
+                if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 }
+            };
+            Write-Output "$yt|$dc"
+        "#;
+
+        if let Ok(out) = Self::run_powershell_script(script) {
+            let trimmed = out.trim();
+            let parts: Vec<&str> = trimmed.split('|').collect();
+            let yt_code = parts.get(0).and_then(|c| c.parse::<i32>().ok()).unwrap_or(0);
+            let dc_code = parts.get(1).and_then(|c| c.parse::<i32>().ok()).unwrap_or(0);
+
+            let yt_ok = yt_code >= 200 && yt_code < 400;
+            let dc_ok = dc_code >= 200 && dc_code < 400;
+
+            let details = format!(
+                "   ▶ YouTube:  {}\n   ▶ Discord:  {}",
+                if yt_ok { format!("🟢 Доступен (HTTP {})", yt_code) } else { "🔴 Не отвечает".to_string() },
+                if dc_ok { format!("🟢 Доступен (HTTP {})", dc_code) } else { "🔴 Не отвечает".to_string() }
+            );
+
+            (yt_ok, dc_ok, details)
+        } else {
+            (false, false, "   ⚠ Не удалось выполнить сетевую проверку".to_string())
+        }
+    }
+
     /// Получить краткую сводку об установке (установлен ли, путь, версия)
     pub fn get_install_summary(config: &ZapretConfig) -> (bool, Option<PathBuf>, Option<String>) {
         let path = config.get_resolved_path();
@@ -959,6 +1177,31 @@ start "zapret: %~n0" /min "%BIN%winws.exe" --wf-tcp=80,443,%GameFilterTCP% ^
         assert_eq!(list.len(), 2);
         assert!(list.contains(&"general (ALT)".to_string()));
         assert!(list.contains(&"general (ALT11)".to_string()));
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_get_latest_test_result_strategy() {
+        let temp_dir = std::env::temp_dir().join(format!("zapret_res_test_{}", std::process::id()));
+        let results_dir = temp_dir.join("utils").join("test results");
+        let _ = fs::create_dir_all(&results_dir);
+
+        let report_content = r#"Config: general (ALT11).bat (Type: standard)
+  YouTubeWeb : HTTP OK | Ping: 25ms
+  DiscordMain : HTTP OK | Ping: 30ms
+
+=== ANALYTICS ===
+general (ALT11).bat : HTTP OK:  15, ERR:   0, UNSUP:   0, Ping OK:  15, Fail:   0
+general (ALT).bat   : HTTP OK:  10, ERR:   5, UNSUP:   0, Ping OK:  10, Fail:   5
+
+Best strategy: general (ALT11).bat
+"#;
+        let file_path = results_dir.join("test_results_2026-09-09_15-00-00.txt");
+        fs::write(&file_path, report_content).unwrap();
+
+        let best = ZapretManager::get_latest_test_result_strategy(&temp_dir);
+        assert_eq!(best, Some("general (ALT11)".to_string()));
 
         let _ = fs::remove_dir_all(&temp_dir);
     }

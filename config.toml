@@ -25,6 +25,14 @@ command = "dark-cli zapret status"
 shortcut = "s"
 
 [[actions]]
+id = "zapret-easy-setup"
+name = "Мастер настройки под ключ (1 клик)"
+description = "Полная автонастройка для нового ПК: установка в C:\\zapret, тест всех стратегий утилитой utils, запуск службы и проверка"
+category = "Zapret"
+command = "dark-cli zapret easy-setup"
+shortcut = "a"
+
+[[actions]]
 id = "zapret-start"
 name = "Запустить службу Zapret"
 description = "Запуск системной службы обхода блокировок (net start zapret, без окон консоли)"

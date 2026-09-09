@@ -79,6 +79,8 @@ enum ZapretCommands {
     },
     /// Удалить службу Windows zapret из системы
     ServiceRemove,
+    /// Установить и настроить Zapret под ключ (автоустановка в C:\zapret, тест всех стратегий, запуск службы и проверка)
+    EasySetup,
     /// Запустить оригинальный service.bat от имени администратора
     Manager,
 }
@@ -277,6 +279,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         Ok(msg) => println!("{}", msg),
                         Err(e) => {
                             eprintln!("Ошибка удаления службы: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                ZapretCommands::EasySetup => {
+                    match ZapretManager::easy_setup(&config, &config_path) {
+                        Ok(msg) => println!("{}", msg),
+                        Err(e) => {
+                            eprintln!("Ошибка автоматической настройки: {}", e);
                             std::process::exit(1);
                         }
                     }
