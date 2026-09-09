@@ -7,6 +7,53 @@ use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Wrap};
 use ratatui::Frame;
 
 pub fn render_output_view(f: &mut Frame, app: &App, area: Rect) {
+    if let Some(ref action) = app.executing_action {
+        let title_spans = Line::from(vec![
+            Span::styled(" Вывод: ", Theme::title()),
+            Span::styled(&action.name, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::raw(" | "),
+            Span::styled(format!("${} ", action.command), Style::default().fg(Color::Cyan)),
+            Span::raw("| Статус: "),
+            Span::styled("⏳ ВЫПОЛНЯЕТСЯ...", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        ]);
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(Color::Yellow))
+            .title(title_spans);
+
+        let lines = vec![
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("  ⏳ Команда запущена и выполняется: ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::styled(&action.name, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            ]),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("  💻 Команда:   ", Style::default().fg(Theme::MUTED)),
+                Span::styled(format!("${}", action.command), Style::default().fg(Color::Cyan)),
+            ]),
+            Line::from(vec![
+                Span::styled("  📁 Категория: ", Style::default().fg(Theme::MUTED)),
+                Span::styled(&action.category, Style::default().fg(Color::White)),
+            ]),
+            Line::from(""),
+            Line::from(Span::styled(
+                "  Пожалуйста, подождите завершения процесса...",
+                Style::default().fg(Color::Yellow),
+            )),
+            Line::from(Span::styled(
+                "  Полный лог выполнения появится на этом экране сразу после окончания работы команды.",
+                Style::default().fg(Theme::MUTED),
+            )),
+        ];
+
+        let paragraph = Paragraph::new(lines).block(block);
+        f.render_widget(paragraph, area);
+        return;
+    }
+
     if let Some(ref res) = app.last_result {
         let code_str = match res.exit_code {
             Some(0) => "УСПЕШНО (0)".to_string(),

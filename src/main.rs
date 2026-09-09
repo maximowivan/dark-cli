@@ -360,6 +360,12 @@ fn main_loop(
             break;
         }
 
+        if let Some(action) = app.pending_action.take() {
+            app.execute_action(&action);
+            terminal.draw(|f| ui::render(f, app))?;
+            continue;
+        }
+
         if event::poll(Duration::from_millis(50))? {
             if let Event::Key(key) = event::read()? {
                 // Ignore key release events on Windows
@@ -443,16 +449,14 @@ fn main_loop(
                             app.input_mode = InputMode::CommandInput;
                             app.input_buffer = "/".to_string();
                         }
-                        KeyCode::Char('r') => {
-                            app.reload_config();
-                        }
                         KeyCode::Char('?') => {
                             app.active_tab = Tab::Help;
                         }
-                        KeyCode::Char('1') => app.active_tab = Tab::Actions,
-                        KeyCode::Char('2') => app.active_tab = Tab::Output,
-                        KeyCode::Char('3') => app.active_tab = Tab::History,
-                        KeyCode::Char('4') => app.active_tab = Tab::Help,
+                        KeyCode::F(1) => app.active_tab = Tab::Actions,
+                        KeyCode::F(2) => app.active_tab = Tab::Output,
+                        KeyCode::F(3) => app.active_tab = Tab::History,
+                        KeyCode::F(4) => app.active_tab = Tab::Help,
+                        KeyCode::F(5) => app.reload_config(),
                         KeyCode::Tab => app.next_tab(),
                         KeyCode::BackTab => app.prev_tab(),
                         KeyCode::Right | KeyCode::Char('l') => {
@@ -503,27 +507,40 @@ fn main_loop(
                         }
                         KeyCode::Char(c) => {
                             let c_str = c.to_string();
-                            let matching_action = if let Some(ref current_cat) = app.current_folder {
-                                app.config.actions.iter()
-                                    .filter(|a| a.category.eq_ignore_ascii_case(current_cat))
-                                    .find(|a| a.shortcut.as_ref().map(|s| s.eq_ignore_ascii_case(&c_str)).unwrap_or(false))
-                                    .or_else(|| {
-                                        app.config.actions.iter().find(|a| {
-                                            a.shortcut.as_ref().map(|s| s.eq_ignore_ascii_case(&c_str)).unwrap_or(false)
+                            let matching_action = if app.active_tab == Tab::Actions {
+                                if let Some(ref current_cat) = app.current_folder {
+                                    app.config.actions.iter()
+                                        .filter(|a| a.category.eq_ignore_ascii_case(current_cat))
+                                        .find(|a| a.shortcut.as_ref().map(|s| s.eq_ignore_ascii_case(&c_str)).unwrap_or(false))
+                                        .or_else(|| {
+                                            app.config.actions.iter().find(|a| {
+                                                a.shortcut.as_ref().map(|s| s.eq_ignore_ascii_case(&c_str)).unwrap_or(false)
+                                            })
                                         })
-                                    })
-                                    .cloned()
+                                        .cloned()
+                                } else {
+                                    app.config.actions.iter().find(|a| {
+                                        a.shortcut.as_ref().map(|s| s.eq_ignore_ascii_case(&c_str)).unwrap_or(false)
+                                    }).cloned()
+                                }
                             } else {
-                                app.config.actions.iter().find(|a| {
-                                    a.shortcut.as_ref().map(|s| s.eq_ignore_ascii_case(&c_str)).unwrap_or(false)
-                                }).cloned()
+                                None
                             };
 
                             if let Some(action) = matching_action {
                                 if action.id == "zapret-install" || (action.id == "zapret-update" && !app.is_zapret_installed()) {
                                     app.start_zapret_install_dialog();
                                 } else {
-                                    app.execute_action(&action);
+                                    app.trigger_action(action);
+                                }
+                            } else {
+                                match c {
+                                    '1' => app.active_tab = Tab::Actions,
+                                    '2' => app.active_tab = Tab::Output,
+                                    '3' => app.active_tab = Tab::History,
+                                    '4' => app.active_tab = Tab::Help,
+                                    'r' => app.reload_config(),
+                                    _ => {}
                                 }
                             }
                         }

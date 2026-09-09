@@ -1,20 +1,14 @@
-# ==========================================================
-# DARK-CLI: Конфигурационный файл
-# ==========================================================
+# Конфигурационный файл Dark CLI / Launcher
+# Вы можете свободно добавлять сюда любые свои команды и скрипты!
 
 [settings]
-# default_cwd = "A:\\git_project1"
-# shell = "cmd"
+# default_cwd = "C:\\projects"
+# shell = "powershell" # или "cmd"
 
-# --- Настройки Zapret (Flowseal) ---
 [zapret]
 path = "C:\\zapret"
 service_name = "zapret"
 github_repo = "Flowseal/zapret-discord-youtube"
-
-# ==========================================================
-# ДЕЙСТВИЯ: УПРАВЛЕНИЕ ZAPRET
-# ==========================================================
 
 [[actions]]
 id = "zapret-status"
@@ -103,3 +97,4 @@ description = "Запустить оригинальный service.bat от им
 category = "Zapret"
 command = "dark-cli zapret manager"
 shortcut = "m"
+

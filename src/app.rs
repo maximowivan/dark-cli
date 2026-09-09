@@ -48,6 +48,8 @@ pub struct App {
     pub status_message: Option<(String, bool)>,
     pub should_quit: bool,
     pub install_dialog: Option<InstallDialogState>,
+    pub pending_action: Option<ActionItem>,
+    pub executing_action: Option<ActionItem>,
     matcher: SkimMatcherV2,
 }
 
@@ -69,6 +71,8 @@ impl App {
             status_message: Some(("Готов к работе. Нажмите [?] для справки.".to_string(), false)),
             should_quit: false,
             install_dialog: None,
+            pending_action: None,
+            executing_action: None,
             matcher: SkimMatcherV2::default(),
         }
     }
@@ -129,7 +133,7 @@ impl App {
             let filtered = self.filtered_actions();
             if let Some((_, action)) = filtered.get(self.palette_selected_idx) {
                 let a = (*action).clone();
-                self.execute_action(&a);
+                self.trigger_action(a);
             }
             self.input_mode = InputMode::Normal;
             self.input_buffer.clear();
@@ -151,7 +155,7 @@ impl App {
                     return;
                 }
                 let a = (*action).clone();
-                self.execute_action(&a);
+                self.trigger_action(a);
             }
             None => {
                 self.set_status("Команда не найдена", true);
@@ -199,7 +203,7 @@ impl App {
             shortcut: None,
             env: None,
         };
-        self.execute_action(&action);
+        self.trigger_action(action);
     }
 
     pub fn execute_selected_action(&mut self) {
@@ -240,7 +244,19 @@ impl App {
         matches.into_iter().map(|(_, idx, item)| (idx, item)).collect()
     }
 
+    /// Запустить действие с немедленным переходом на вкладку вывода
+    pub fn trigger_action(&mut self, action: ActionItem) {
+        self.active_tab = Tab::Output;
+        self.output_scroll = 0;
+        self.set_status(format!("Выполняется: {}...", action.name), false);
+        self.executing_action = Some(action.clone());
+        self.pending_action = Some(action);
+    }
+
     pub fn execute_action(&mut self, action: &ActionItem) {
+        self.active_tab = Tab::Output;
+        self.output_scroll = 0;
+        self.executing_action = Some(action.clone());
         self.set_status(format!("Выполняется: {}...", action.name), false);
         
         let result = CommandExecutor::execute(
@@ -262,13 +278,14 @@ impl App {
 
         self.last_result = Some(result.clone());
         self.history.push(result);
+        self.executing_action = None;
         self.output_scroll = 0;
         self.active_tab = Tab::Output;
     }
 
     pub fn execute_action_by_id(&mut self, id: &str) -> bool {
         if let Some(action) = self.config.actions.iter().find(|a| a.id.eq_ignore_ascii_case(id)).cloned() {
-            self.execute_action(&action);
+            self.trigger_action(action);
             true
         } else {
             self.set_status(format!("Действие с ID '{}' не найдено", id), true);
@@ -551,4 +568,41 @@ mod tests {
         app.handle_slash_command("/exit");
         assert!(app.should_quit);
     }
+
+    #[test]
+    fn test_trigger_action_switches_tab_and_sets_pending() {
+        let mut app = create_test_app();
+        assert_eq!(app.active_tab, Tab::Actions);
+        assert!(app.pending_action.is_none());
+        assert!(app.executing_action.is_none());
+
+        let test_action = ActionItem {
+            id: "test-zapret-start".to_string(),
+            name: "Запуск".to_string(),
+            description: "Тест запуска".to_string(),
+            category: "Zapret".to_string(),
+            command: "echo test".to_string(),
+            cwd: None,
+            shortcut: Some("1".to_string()),
+            env: None,
+        };
+
+        app.trigger_action(test_action.clone());
+
+        // Immediately switches to Output tab
+        assert_eq!(app.active_tab, Tab::Output);
+        assert_eq!(app.executing_action.as_ref().map(|a| a.id.as_str()), Some("test-zapret-start"));
+        assert_eq!(app.pending_action.as_ref().map(|a| a.id.as_str()), Some("test-zapret-start"));
+
+        // Simulate main_loop executing the pending action
+        let pending = app.pending_action.take().expect("pending action must exist");
+        app.execute_action(&pending);
+
+        assert_eq!(app.active_tab, Tab::Output);
+        assert!(app.executing_action.is_none());
+        assert!(app.pending_action.is_none());
+        assert!(app.last_result.is_some());
+        assert_eq!(app.last_result.as_ref().unwrap().id, "test-zapret-start");
+    }
 }
+
