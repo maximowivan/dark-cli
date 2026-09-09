@@ -239,3 +239,133 @@ impl App {
         };
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create_test_app() -> App {
+        let config = AppConfig::default_with_samples();
+        App::new(config, PathBuf::from("config.toml"))
+    }
+
+    #[test]
+    fn test_tab_cycling() {
+        let mut app = create_test_app();
+        assert_eq!(app.active_tab, Tab::Actions);
+
+        app.next_tab();
+        assert_eq!(app.active_tab, Tab::Output);
+
+        app.next_tab();
+        assert_eq!(app.active_tab, Tab::History);
+
+        app.next_tab();
+        assert_eq!(app.active_tab, Tab::Help);
+
+        app.next_tab();
+        assert_eq!(app.active_tab, Tab::Actions);
+
+        app.prev_tab();
+        assert_eq!(app.active_tab, Tab::Help);
+    }
+
+    #[test]
+    fn test_action_navigation() {
+        let mut app = create_test_app();
+        let total = app.config.actions.len();
+        assert!(total > 0);
+
+        assert_eq!(app.selected_action_idx, 0);
+        app.next_action();
+        assert_eq!(app.selected_action_idx, 1);
+
+        app.prev_action();
+        assert_eq!(app.selected_action_idx, 0);
+
+        // Wrap around to the end
+        app.prev_action();
+        assert_eq!(app.selected_action_idx, total - 1);
+    }
+
+    #[test]
+    fn test_fuzzy_filtering() {
+        let mut app = create_test_app();
+
+        // No query: all actions returned
+        assert_eq!(app.filtered_actions().len(), app.config.actions.len());
+
+        // Filter by "cargo"
+        app.input_buffer = "cargo".to_string();
+        let filtered = app.filtered_actions();
+        assert!(!filtered.is_empty());
+        for (_, action) in &filtered {
+            let matches = action.name.to_lowercase().contains("cargo")
+                || action.command.to_lowercase().contains("cargo")
+                || action.category.to_lowercase().contains("cargo");
+            assert!(matches);
+        }
+
+        // Filter by non-existent text
+        app.input_buffer = "non_existent_query_xyz_123".to_string();
+        assert_eq!(app.filtered_actions().len(), 0);
+    }
+
+    #[test]
+    fn test_execution_and_history() {
+        let mut app = create_test_app();
+
+        let test_action = ActionItem {
+            id: "test-echo".to_string(),
+            name: "Test Echo".to_string(),
+            description: "Echo test".to_string(),
+            category: "Test".to_string(),
+            command: "echo dark_test_output_123".to_string(),
+            cwd: None,
+            shortcut: None,
+            env: None,
+        };
+
+        app.execute_action(&test_action);
+
+        assert_eq!(app.active_tab, Tab::Output);
+        assert!(app.last_result.is_some());
+
+        let res = app.last_result.as_ref().unwrap();
+        assert!(res.success);
+        assert_eq!(res.exit_code, Some(0));
+        assert!(res.output.contains("dark_test_output_123"));
+
+        assert_eq!(app.history.len(), 1);
+        assert_eq!(app.history[0].id, "test-echo");
+    }
+
+    #[test]
+    fn test_slash_commands() {
+        let mut app = create_test_app();
+
+        // Test /help
+        app.handle_slash_command("/help");
+        assert_eq!(app.active_tab, Tab::Help);
+
+        // Test /clear
+        app.last_result = Some(ExecutionResult {
+            id: "dummy".to_string(),
+            name: "dummy".to_string(),
+            command: "dummy".to_string(),
+            output: "dummy output".to_string(),
+            exit_code: Some(0),
+            duration: std::time::Duration::from_millis(10),
+            timestamp: chrono::Local::now(),
+            success: true,
+        });
+        assert!(app.last_result.is_some());
+        app.handle_slash_command("/clear");
+        assert!(app.last_result.is_none());
+
+        // Test /exit
+        assert!(!app.should_quit);
+        app.handle_slash_command("/exit");
+        assert!(app.should_quit);
+    }
+}

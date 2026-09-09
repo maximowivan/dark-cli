@@ -621,6 +621,7 @@ dependencies = [
  "crossterm",
  "dirs",
  "fuzzy-matcher",
+ "oem_cp",
  "ratatui",
  "serde",
  "toml",
@@ -948,6 +949,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5c7398b9c8b70908f6371f47ed36737907c87c52af34c268fed0bf0ceb92ead9"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "oem_cp"
+version = "2.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8c7959d3349f484aec36462f98226983578bf7d33f9b034c32967489c7000e1f"
+dependencies = [
+ "phf",
 ]
 
 [[package]]

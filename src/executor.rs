@@ -51,8 +51,8 @@ impl CommandExecutor {
 
         match output_res {
             Ok(output) => {
-                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                let stdout = decode_bytes(&output.stdout);
+                let stderr = decode_bytes(&output.stderr);
 
                 let mut combined = String::new();
                 if !stdout.is_empty() {
@@ -91,5 +91,20 @@ impl CommandExecutor {
                 success: false,
             },
         }
+    }
+}
+
+fn decode_bytes(bytes: &[u8]) -> String {
+    if let Ok(s) = std::str::from_utf8(bytes) {
+        return s.to_string();
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use oem_cp::{Cp866, StringExt};
+        String::from_cp::<Cp866>(bytes)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        String::from_utf8_lossy(bytes).to_string()
     }
 }

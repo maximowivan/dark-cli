@@ -12,3 +12,4 @@ ratatui = "0.30.2"
 serde = { version = "1.0", features = ["derive"] }
 toml = "1.1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+oem_cp = "2.1.2"
