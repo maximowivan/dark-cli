@@ -1,0 +1,122 @@
+use crate::app::App;
+use crate::ui::theme::Theme;
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, Paragraph, Wrap};
+use ratatui::Frame;
+
+pub fn render_actions_view(f: &mut Frame, app: &App, area: Rect) {
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
+        .split(area);
+
+    let filtered = app.filtered_actions();
+
+    // Actions List (Left)
+    let items: Vec<ListItem> = filtered
+        .iter()
+        .enumerate()
+        .map(|(i, (_, action))| {
+            let is_selected = i == app.selected_action_idx;
+
+            let prefix = if is_selected { " ▶ " } else { "   " };
+            let cat_style = Theme::category_badge(&action.category);
+
+            let shortcut_span = if let Some(ref sc) = action.shortcut {
+                Span::styled(format!("[{}] ", sc), Style::default().fg(Color::Yellow))
+            } else {
+                Span::raw("")
+            };
+
+            let line = Line::from(vec![
+                Span::styled(prefix, if is_selected { Style::default().fg(Theme::PRIMARY) } else { Style::default() }),
+                Span::styled(format!("{:<11} ", format!("[{}]", action.category)), cat_style),
+                Span::styled(format!("{:<18} ", action.name), if is_selected { Theme::selected_item() } else { Style::default().fg(Color::White) }),
+                shortcut_span,
+                Span::styled(format!("({})", action.id), Style::default().fg(Theme::MUTED)),
+            ]);
+
+            ListItem::new(line)
+        })
+        .collect();
+
+    let title_text = format!(" Actions ({}) ", filtered.len());
+    let list_block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Theme::border_active())
+        .title(Span::styled(title_text, Theme::title()));
+
+    let list_widget = List::new(items).block(list_block);
+    f.render_widget(list_widget, chunks[0]);
+
+    // Detail Panel (Right)
+    let detail_block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Theme::border())
+        .title(Span::styled(" Action Details ", Theme::title()));
+
+    if let Some((_, selected_action)) = filtered.get(app.selected_action_idx) {
+        let sc_text = selected_action.shortcut.as_deref().unwrap_or("None");
+        let cwd_text = selected_action.cwd.as_deref().unwrap_or("Current directory");
+
+        let lines = vec![
+            Line::from(vec![
+                Span::styled("Name:        ", Style::default().fg(Theme::MUTED)),
+                Span::styled(&selected_action.name, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            ]),
+            Line::from(vec![
+                Span::styled("ID:          ", Style::default().fg(Theme::MUTED)),
+                Span::styled(&selected_action.id, Style::default().fg(Color::Cyan)),
+            ]),
+            Line::from(vec![
+                Span::styled("Category:    ", Style::default().fg(Theme::MUTED)),
+                Span::styled(&selected_action.category, Theme::category_badge(&selected_action.category)),
+            ]),
+            Line::from(vec![
+                Span::styled("Shortcut:    ", Style::default().fg(Theme::MUTED)),
+                Span::styled(sc_text, Style::default().fg(Color::Yellow)),
+            ]),
+            Line::from(vec![
+                Span::styled("Working Dir: ", Style::default().fg(Theme::MUTED)),
+                Span::styled(cwd_text, Style::default().fg(Color::Gray)),
+            ]),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("Command:", Style::default().fg(Theme::PRIMARY).add_modifier(Modifier::BOLD)),
+            ]),
+            Line::from(vec![
+                Span::styled(format!("  $ {}", selected_action.command), Style::default().fg(Color::Green)),
+            ]),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("Description:", Style::default().fg(Theme::PRIMARY).add_modifier(Modifier::BOLD)),
+            ]),
+            Line::from(vec![
+                Span::styled(format!("  {}", selected_action.description), Style::default().fg(Color::White)),
+            ]),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("─── Hotkey ───", Style::default().fg(Theme::MUTED)),
+            ]),
+            Line::from(vec![
+                Span::styled("Press ", Style::default().fg(Theme::MUTED)),
+                Span::styled("[Enter]", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::styled(" to execute this action", Style::default().fg(Theme::MUTED)),
+            ]),
+        ];
+
+        let detail_p = Paragraph::new(lines)
+            .block(detail_block)
+            .wrap(Wrap { trim: false });
+        f.render_widget(detail_p, chunks[1]);
+    } else {
+        let empty_p = Paragraph::new("Нет доступных действий по текущему фильтру.")
+            .block(detail_block)
+            .style(Style::default().fg(Theme::MUTED));
+        f.render_widget(empty_p, chunks[1]);
+    }
+}
