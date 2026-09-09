@@ -35,8 +35,17 @@ impl ZapretManager {
         let process_status = Self::check_winws_process();
         out.push_str(&format!("⚡ Процесс winws:     {}\n", process_status));
 
-        // 3. Активная стратегия из реестра
-        let strategy = Self::get_active_strategy(&config.service_name);
+        // 3. Активная стратегия из реестра или папки
+        let mut strategy = Self::get_active_strategy(&config.service_name);
+        if strategy == "Не определена в реестре" {
+            if let Some(ref dir) = resolved_path {
+                if let Some(strat_path) = Self::find_strategy_bat(dir) {
+                    if let Some(name) = strat_path.file_name().and_then(|n| n.to_str()) {
+                        strategy = format!("{} (для прямого запуска)", name);
+                    }
+                }
+            }
+        }
         out.push_str(&format!("🎯 Активная стратегия: {}\n", strategy));
 
         // 4. Локальная версия
@@ -52,6 +61,9 @@ impl ZapretManager {
             out.push_str("   нажмите [u] в меню TUI. Программа предложит два варианта:\n");
             out.push_str("     [1] Установить в папку по умолчанию (C:\\zapret)\n");
             out.push_str("     [2] Выбрать свою папку\n");
+        } else if service_status.contains("Не установлена") {
+            out.push_str("\n💡 Служба Windows не зарегистрирована. Zapret можно запускать напрямую (клавиша '1')\n");
+            out.push_str("   или зарегистрировать как постоянную службу через Service.bat (клавиша 'm').\n");
         }
 
         // 5. Проверка последнего релиза на GitHub
@@ -79,34 +91,194 @@ impl ZapretManager {
         out
     }
 
-    /// Запустить службу Zapret
+    /// Найти наиболее подходящий .bat файл стратегии в папке Zapret
+    pub fn find_strategy_bat(zapret_dir: &Path) -> Option<PathBuf> {
+        let preferred = [
+            "general (ALT11).bat",
+            "general (ALT10).bat",
+            "general (ALT).bat",
+            "general.bat",
+            "general (ALT1).bat",
+            "general (ALT2).bat",
+            "general (ALT3).bat",
+            "general (ALT4).bat",
+            "general (ALT5).bat",
+            "general (ALT6).bat",
+            "general (ALT7).bat",
+            "general (ALT8).bat",
+            "general (ALT9).bat",
+        ];
+        for name in &preferred {
+            let candidate = zapret_dir.join(name);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+
+        // Поиск любого другого general*.bat
+        if let Ok(entries) = fs::read_dir(zapret_dir) {
+            let mut generals = Vec::new();
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() {
+                    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                        let name_lower = name.to_lowercase();
+                        if name_lower.ends_with(".bat") && name_lower.starts_with("general") {
+                            generals.push(path);
+                        }
+                    }
+                }
+            }
+            generals.sort();
+            if let Some(first) = generals.into_iter().next() {
+                return Some(first);
+            }
+        }
+
+        // Поиск любого .bat кроме service.bat
+        if let Ok(entries) = fs::read_dir(zapret_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() {
+                    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                        let name_lower = name.to_lowercase();
+                        if name_lower.ends_with(".bat") && !name_lower.starts_with("service") {
+                            return Some(path);
+                        }
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Запустить Zapret (службу Windows или автономный процесс winws.exe)
     pub fn start(config: &ZapretConfig) -> Result<String, String> {
+        let resolved_path = config.get_resolved_path().ok_or_else(|| {
+            "Папка Zapret не найдена на этом ПК! Нажмите [u] ('Обновить / Установить Zapret') или [i] для установки.".to_string()
+        })?;
+
         let service = &config.service_name;
-        let script = format!(
+
+        // 1. Проверяем, не запущен ли уже winws.exe
+        let check_script = "$proc = Get-Process winws -ErrorAction SilentlyContinue; if ($proc) { $proc.Id -join ', ' }";
+        if let Ok(pid_out) = Self::run_powershell_script(check_script) {
+            let pids = pid_out.trim();
+            if !pids.is_empty() {
+                return Ok(format!(
+                    "⚡ Zapret (winws.exe) уже запущен и работает в фоновом режиме (PID: {}).",
+                    pids
+                ));
+            }
+        }
+
+        // 2. Проверяем наличие установленной службы Windows
+        let check_service_script = format!(
             "$s = Get-Service -Name '{}' -ErrorAction SilentlyContinue; \
-             if ($s.Status -eq 'Running') {{ Write-Output 'Служба {} уже запущена.' }} \
-             else {{ Start-Process cmd -ArgumentList '/c net start {}' -Verb RunAs -Wait; \
-                     $s2 = Get-Service -Name '{}' -ErrorAction SilentlyContinue; \
-                     if ($s2.Status -eq 'Running') {{ Write-Output 'Служба {} успешно запущена!' }} \
-                     else {{ Write-Output 'Не удалось запустить службу {}. Проверьте права администратора.' }} }}",
-            service, service, service, service, service, service
+             if ($s) {{ $s.Status.ToString() }} else {{ 'NOT_INSTALLED' }}",
+            service
         );
 
-        Self::run_powershell_script(&script)
+        let service_state = Self::run_powershell_script(&check_service_script)
+            .unwrap_or_else(|_| "NOT_INSTALLED".to_string());
+        let service_state = service_state.trim();
+
+        if service_state == "Running" {
+            return Ok(format!("Служба Windows '{}' уже запущена.", service));
+        } else if service_state == "Stopped" || service_state == "Paused" {
+            // Служба установлена, запускаем ее
+            let start_service_script = format!(
+                "Start-Process cmd -ArgumentList '/c net start {}' -Verb RunAs -Wait; \
+                 $s = Get-Service -Name '{}' -ErrorAction SilentlyContinue; \
+                 if ($s.Status -eq 'Running') {{ 'OK' }} else {{ 'FAIL' }}",
+                service, service
+            );
+            let res = Self::run_powershell_script(&start_service_script)?;
+            if res.trim() == "OK" {
+                return Ok(format!("🟢 Служба Windows '{}' успешно запущена!", service));
+            } else {
+                return Err(format!(
+                    "Не удалось запустить службу '{}'. Проверьте системный журнал или откройте Service.bat (клавиша 'm').",
+                    service
+                ));
+            }
+        }
+
+        // 3. Служба Windows НЕ установлена -> запускаем автономную стратегию (general*.bat)
+        let strategy_bat = Self::find_strategy_bat(&resolved_path).ok_or_else(|| {
+            format!(
+                "Служба Windows '{}' не установлена, и в папке '{}' не найден подходящий файл стратегии (general*.bat).\n\
+                 Откройте Service.bat (клавиша 'm') для настройки или обновите Zapret (клавиша 'u').",
+                service, resolved_path.display()
+            )
+        })?;
+
+        let bat_name = strategy_bat
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "general.bat".to_string());
+
+        let start_bat_script = format!(
+            "Start-Process cmd.exe -ArgumentList '/c cd /d \"{}\" && \"{}\"' -Verb RunAs -WindowStyle Minimized; \
+             Start-Sleep -Seconds 2; \
+             $proc = Get-Process winws -ErrorAction SilentlyContinue; \
+             if ($proc) {{ $proc.Id -join ', ' }} else {{ 'FAIL' }}",
+            resolved_path.display(),
+            strategy_bat.display()
+        );
+
+        let res = Self::run_powershell_script(&start_bat_script)?;
+        let trimmed = res.trim();
+
+        if trimmed != "FAIL" && !trimmed.is_empty() {
+            Ok(format!(
+                "🟢 Zapret успешно запущен в фоновом режиме!\n\
+                 🎯 Стратегия запуска: {}\n\
+                 ⚡ Процесс winws.exe активен (PID: {})\n\n\
+                 💡 Примечание: Windows-служба '{}' пока не зарегистрирована в автозагрузке.\n\
+                    Если хотите, чтобы Zapret запускался сам при включении ПК, откройте\n\
+                    'Service.bat (Менеджер)' (клавиша 'm') и выберите пункт '1. Install Service'.",
+                bat_name, trimmed, service
+            ))
+        } else {
+            Err(format!(
+                "Не удалось запустить Zapret через '{}'.\n\
+                 Возможно, запрос прав администратора (UAC) был отклонен или антивирус заблокировал WinDivert.",
+                bat_name
+            ))
+        }
     }
 
     /// Остановить службу Zapret и завершить процесс winws.exe
     pub fn stop(config: &ZapretConfig) -> Result<String, String> {
         let service = &config.service_name;
         let script = format!(
-            "Start-Process cmd -ArgumentList '/c net stop {} & taskkill /F /IM winws.exe & net stop WinDivert' -Verb RunAs -Wait; \
+            "$s = Get-Service -Name '{service}' -ErrorAction SilentlyContinue; \
+             if ($s -and $s.Status -eq 'Running') {{ \
+                 Start-Process cmd -ArgumentList '/c net stop {service} & taskkill /F /IM winws.exe & net stop WinDivert' -Verb RunAs -Wait; \
+             }} else {{ \
+                 Start-Process cmd -ArgumentList '/c taskkill /F /IM winws.exe & net stop WinDivert' -Verb RunAs -Wait; \
+             }} \
              $proc = Get-Process winws -ErrorAction SilentlyContinue; \
              if ($proc) {{ taskkill /F /IM winws.exe | Out-Null }}; \
-             Write-Output 'Служба {} и процесс winws.exe остановлены.'",
-            service, service
+             $procAfter = Get-Process winws -ErrorAction SilentlyContinue; \
+             if ($procAfter) {{ \
+                 Write-Output 'WARNING_STILL_RUNNING' \
+             }} else {{ \
+                 Write-Output 'STOPPED_SUCCESS' \
+             }}"
         );
 
-        Self::run_powershell_script(&script)
+        let out = Self::run_powershell_script(&script)?;
+        let trimmed = out.trim();
+        if trimmed.contains("STOPPED_SUCCESS") {
+            Ok("🛑 Zapret успешно остановлен (все процессы winws.exe и службы завершены).".to_string())
+        } else if trimmed.contains("WARNING_STILL_RUNNING") {
+            Err("Не удалось завершить процесс winws.exe. Проверьте права администратора.".to_string())
+        } else {
+            Ok(format!("Служба {} и процесс winws.exe остановлены.", service))
+        }
     }
 
     /// Перезапустить службу Zapret
@@ -119,7 +291,7 @@ impl ZapretManager {
 
         sleep(Duration::from_millis(1500));
 
-        report.push_str("\n2. Запуск службы Zapret...\n");
+        report.push_str("\n2. Запуск Zapret...\n");
         let start_res = Self::start(config)?;
         report.push_str(&start_res);
 
@@ -495,3 +667,47 @@ fn decode_bytes(bytes: &[u8]) -> String {
         String::from_utf8_lossy(bytes).to_string()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs::File;
+
+    #[test]
+    fn test_find_strategy_bat_prefers_alt11() {
+        let temp_dir = std::env::temp_dir().join(format!("zapret_strat_test_{}", std::process::id()));
+        let _ = fs::create_dir_all(&temp_dir);
+
+        let _ = File::create(temp_dir.join("general (ALT).bat"));
+        let _ = File::create(temp_dir.join("general (ALT11).bat"));
+        let _ = File::create(temp_dir.join("general.bat"));
+
+        let found = ZapretManager::find_strategy_bat(&temp_dir);
+        assert!(found.is_some());
+        assert_eq!(
+            found.unwrap().file_name().unwrap().to_string_lossy(),
+            "general (ALT11).bat"
+        );
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_find_strategy_bat_fallback() {
+        let temp_dir = std::env::temp_dir().join(format!("zapret_fallback_test_{}", std::process::id()));
+        let _ = fs::create_dir_all(&temp_dir);
+
+        let _ = File::create(temp_dir.join("general_custom_rule.bat"));
+        let _ = File::create(temp_dir.join("service.bat"));
+
+        let found = ZapretManager::find_strategy_bat(&temp_dir);
+        assert!(found.is_some());
+        assert_eq!(
+            found.unwrap().file_name().unwrap().to_string_lossy(),
+            "general_custom_rule.bat"
+        );
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+}
+
