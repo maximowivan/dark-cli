@@ -178,3 +178,15 @@ description = "Открыть каталог с исполняемым файл�
 category = "Telegram Proxy"
 command = "dark-cli tg-proxy open"
 shortcut = "o"
+
+# ==========================================================
+# ДЕЙСТВИЯ: DARK-CLI (СИСТЕМА И ОБНОВЛЕНИЯ)
+# ==========================================================
+
+[[actions]]
+id = "dark-cli-self-update"
+name = "Обновить Dark-CLI"
+description = "Проверка наличия обновлений Dark-CLI на GitHub (maximowivan/dark-cli) и установка в 1 клик"
+category = "Dark-CLI"
+command = "dark-cli self-update"
+shortcut = "u"

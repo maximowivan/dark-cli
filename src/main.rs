@@ -1,6 +1,7 @@
 mod app;
 mod config;
 mod executor;
+mod self_update;
 mod tg_proxy;
 mod ui;
 mod zapret;
@@ -24,6 +25,10 @@ use zapret::ZapretManager;
 #[command(name = "dark-cli")]
 #[command(about = "Универсальный CLI/TUI лаунчер и диспетчер задач в стиле OpenCode", long_about = None)]
 struct Cli {
+    /// Отключить автоматическую проверку обновлений при запуске
+    #[arg(long, global = true)]
+    no_update: bool,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -39,6 +44,12 @@ enum Commands {
     List,
     /// Сгенерировать config.toml по умолчанию
     Init,
+    /// Проверить и обновить Dark-CLI до последней версии с GitHub
+    SelfUpdate {
+        /// Принудительно обновить даже при совпадении версии
+        #[arg(short, long)]
+        force: bool,
+    },
     /// Управление сервисом и обновлениями Flowseal Zapret
     Zapret {
         #[command(subcommand)]
@@ -132,6 +143,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (config, config_path) = AppConfig::load_or_create()
         .map_err(|e| format!("Ошибка конфигурации: {}", e))?;
 
+    // Очистка старых .old файлов после автообновления
+    self_update::SelfUpdateManager::cleanup_old_binary();
+
     // Handle CLI subcommands
     match cli.command {
         Some(Commands::Run { id }) => {
@@ -169,6 +183,42 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Some(Commands::Init) => {
             println!("Конфигурационный файл актуален: {}", config_path.display());
+            return Ok(());
+        }
+        Some(Commands::SelfUpdate { force }) => {
+            let repo = self_update::DEFAULT_REPO;
+            let cur_ver = env!("CARGO_PKG_VERSION");
+            println!("🔍 Проверка обновлений Dark-CLI на GitHub ({})...", repo);
+            println!("🏷 Текущая версия: v{}", cur_ver);
+
+            match self_update::SelfUpdateManager::check_for_update(repo) {
+                Ok(Some(asset)) => {
+                    println!("\n🚀 Доступна новая версия: {}!", asset.tag_name);
+                    println!("⬇ Загрузка {}...", asset.asset_name);
+                    match self_update::SelfUpdateManager::apply_update(&asset) {
+                        Ok(_) => {
+                            println!("✨ Dark-CLI успешно обновлен до {}!", asset.tag_name);
+                            println!("🚀 Перезапуск обновленной версии...");
+                            let _ = self_update::SelfUpdateManager::restart_process();
+                        }
+                        Err(e) => {
+                            eprintln!("❌ Ошибка применения обновления: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                Ok(None) => {
+                    if force {
+                        println!("⚡ Принудительная переустановка текущей версии...");
+                    } else {
+                        println!("✨ У вас уже установлена актуальная версия Dark-CLI (v{})!", cur_ver);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("⚠ Не удалось проверить обновления: {}", e);
+                    std::process::exit(1);
+                }
+            }
             return Ok(());
         }
         Some(Commands::Zapret { action }) => {
@@ -445,6 +495,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             return Ok(());
         }
         None => {
+            // Автоматическая проверка обновлений при старте (если не отключена флагом --no-update)
+            if !cli.no_update {
+                if self_update::SelfUpdateManager::auto_update_on_startup(self_update::DEFAULT_REPO) {
+                    return Ok(());
+                }
+            }
+
             // Launch Interactive OpenCode TUI
             run_tui(config, config_path)?;
         }
