@@ -1,26 +1,18 @@
 @echo off
-chcp 65001 >nul
-title Синхронизация с GitHub (dark-cli)
 cd /d "%~dp0"
 
 echo ==========================================================
-echo  🚀 Синхронизация Dark-CLI с GitHub
-echo  Репозиторий: https://github.com/maximowivan/dark-cli
+echo   Syncing Dark-CLI with GitHub (maximowivan/dark-cli)
 echo ==========================================================
-echo.
-echo Отправка коммитов в ветку main...
-echo (Если появится окно входа GitHub, подтвердите вход через браузер)
 echo.
 
 git push -u origin main
 
 echo.
-if %ERRORLEVEL% equ 0 (
-    echo ==========================================================
-    echo  ✨ Проект успешно синхронизирован с GitHub!
-    echo ==========================================================
+if errorlevel 1 (
+    echo [ERROR] Push failed. Please check your GitHub access rights.
 ) else (
-    echo ❌ Ошибка при отправке. Проверьте права доступа к репозиторию.
+    echo [SUCCESS] Repository successfully synchronized with GitHub!
 )
 echo.
 pause
