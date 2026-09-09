@@ -50,6 +50,7 @@ impl Theme {
             "git" => Style::default().fg(Color::LightYellow),
             "system" | "sys" | "система" => Style::default().fg(Color::LightMagenta),
             "web" | "веб" => Style::default().fg(Color::LightBlue),
+            "zapret" => Style::default().fg(Color::Rgb(255, 140, 50)),
             _ => Style::default().fg(Color::LightGreen),
         }
     }

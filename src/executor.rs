@@ -22,7 +22,27 @@ impl CommandExecutor {
         let start = Instant::now();
         let timestamp = chrono::Local::now();
 
-        let mut cmd = if cfg!(target_os = "windows") {
+        let is_self_cmd = action.command.starts_with("dark-cli ") || action.command.starts_with("git_project1 ");
+        let mut cmd = if is_self_cmd {
+            if let Ok(current_exe) = std::env::current_exe() {
+                let sub = if action.command.starts_with("dark-cli ") {
+                    &action.command[9..]
+                } else {
+                    &action.command[13..]
+                };
+                let mut c = Command::new(current_exe);
+                c.args(sub.split_whitespace());
+                c
+            } else if cfg!(target_os = "windows") {
+                let mut c = Command::new("cmd");
+                c.args(["/C", &action.command]);
+                c
+            } else {
+                let mut c = Command::new("sh");
+                c.args(["-c", &action.command]);
+                c
+            }
+        } else if cfg!(target_os = "windows") {
             let mut c = Command::new("cmd");
             c.args(["/C", &action.command]);
             c

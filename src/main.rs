@@ -2,6 +2,7 @@ mod app;
 mod config;
 mod executor;
 mod ui;
+mod zapret;
 
 use app::{App, InputMode, Tab};
 use clap::{Parser, Subcommand};
@@ -15,6 +16,7 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io::{self, stdout};
 use std::panic;
 use std::time::Duration;
+use zapret::ZapretManager;
 
 #[derive(Parser)]
 #[command(name = "dark-cli")]
@@ -28,13 +30,40 @@ struct Cli {
 enum Commands {
     /// Запустить действие напрямую по его ID без открытия TUI
     Run {
-        /// Идентификатор действия (например, cargo-check, git-status)
+        /// Идентификатор действия (например, zapret-status, zapret-restart)
         id: String,
     },
     /// Вывести список всех настроенных команд в виде таблицы
     List,
     /// Сгенерировать config.toml по умолчанию
     Init,
+    /// Управление сервисом и обновлениями Flowseal Zapret
+    Zapret {
+        #[command(subcommand)]
+        action: ZapretCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum ZapretCommands {
+    /// Проверить статус службы, процессов и актуальность версии
+    Status,
+    /// Запустить службу Zapret
+    Start,
+    /// Остановить службу Zapret и процессы winws
+    Stop,
+    /// Перезапустить службу Zapret
+    Restart,
+    /// Обновить Zapret до последней версии с GitHub (сохраняя пользовательские списки)
+    Update {
+        /// Принудительно обновить, даже если версия уже совпадает
+        #[arg(short, long)]
+        force: bool,
+    },
+    /// Открыть папку с программой Zapret в Проводнике
+    Open,
+    /// Запустить оригинальный service.bat от имени администратора
+    Manager,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -79,6 +108,69 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Some(Commands::Init) => {
             println!("Конфигурационный файл актуален: {}", config_path.display());
+            return Ok(());
+        }
+        Some(Commands::Zapret { action }) => {
+            let zapret_cfg = config.zapret.unwrap_or_default();
+            match action {
+                ZapretCommands::Status => {
+                    println!("{}", ZapretManager::get_status(&zapret_cfg));
+                }
+                ZapretCommands::Start => {
+                    match ZapretManager::start(&zapret_cfg) {
+                        Ok(msg) => println!("{}", msg),
+                        Err(e) => {
+                            eprintln!("Ошибка запуска: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                ZapretCommands::Stop => {
+                    match ZapretManager::stop(&zapret_cfg) {
+                        Ok(msg) => println!("{}", msg),
+                        Err(e) => {
+                            eprintln!("Ошибка остановки: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                ZapretCommands::Restart => {
+                    match ZapretManager::restart(&zapret_cfg) {
+                        Ok(msg) => println!("{}", msg),
+                        Err(e) => {
+                            eprintln!("Ошибка перезапуска: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                ZapretCommands::Update { force } => {
+                    match ZapretManager::update(&zapret_cfg, force) {
+                        Ok(msg) => println!("{}", msg),
+                        Err(e) => {
+                            eprintln!("Ошибка обновления: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                ZapretCommands::Open => {
+                    match ZapretManager::open_folder(&zapret_cfg) {
+                        Ok(msg) => println!("{}", msg),
+                        Err(e) => {
+                            eprintln!("{}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                ZapretCommands::Manager => {
+                    match ZapretManager::run_manager(&zapret_cfg) {
+                        Ok(msg) => println!("{}", msg),
+                        Err(e) => {
+                            eprintln!("{}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+            }
             return Ok(());
         }
         None => {

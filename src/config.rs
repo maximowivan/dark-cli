@@ -27,10 +27,109 @@ fn default_category() -> String {
     "General".to_string()
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ZapretConfig {
+    pub path: Option<String>,
+    #[serde(default = "default_zapret_service")]
+    pub service_name: String,
+    #[serde(default = "default_zapret_repo")]
+    pub github_repo: String,
+}
+
+fn default_zapret_service() -> String {
+    "zapret".to_string()
+}
+
+fn default_zapret_repo() -> String {
+    "Flowseal/zapret-discord-youtube".to_string()
+}
+
+impl Default for ZapretConfig {
+    fn default() -> Self {
+        Self {
+            path: None,
+            service_name: default_zapret_service(),
+            github_repo: default_zapret_repo(),
+        }
+    }
+}
+
+impl ZapretConfig {
+    pub fn get_resolved_path(&self) -> Option<PathBuf> {
+        if let Some(ref p) = self.path {
+            let pb = PathBuf::from(p);
+            if pb.exists() {
+                return Some(pb);
+            }
+        }
+
+        // Try detecting from registry on Windows
+        #[cfg(target_os = "windows")]
+        {
+            if let Some(reg_path) = Self::detect_from_registry() {
+                if reg_path.exists() {
+                    return Some(reg_path);
+                }
+            }
+        }
+
+        // Check common candidate locations
+        let candidates = [
+            "S:\\zapret",
+            "C:\\zapret",
+            "D:\\zapret",
+            "E:\\zapret",
+            "C:\\Program Files\\zapret",
+        ];
+
+        for c in &candidates {
+            let pb = PathBuf::from(c);
+            if pb.exists() && (pb.join("service.bat").exists() || pb.join("bin\\winws.exe").exists()) {
+                return Some(pb);
+            }
+        }
+
+        None
+    }
+
+    #[cfg(target_os = "windows")]
+    fn detect_from_registry() -> Option<PathBuf> {
+        use std::process::Command;
+        let output = Command::new("reg")
+            .args(["query", "HKLM\\SYSTEM\\CurrentControlSet\\Services\\zapret", "/v", "ImagePath"])
+            .output()
+            .ok()?;
+
+        if output.status.success() {
+            let text = String::from_utf8_lossy(&output.stdout);
+            for line in text.lines() {
+                if line.contains("ImagePath") {
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    for part in parts {
+                        let clean = part.trim_matches('"');
+                        if clean.ends_with("winws.exe") {
+                            let exe_path = PathBuf::from(clean);
+                            // Path is ...\bin\winws.exe -> get root zapret dir
+                            if let Some(bin_dir) = exe_path.parent() {
+                                if let Some(root) = bin_dir.parent() {
+                                    return Some(root.to_path_buf());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AppConfig {
     #[serde(default)]
     pub settings: Settings,
+    #[serde(default)]
+    pub zapret: Option<ZapretConfig>,
     #[serde(default)]
     pub actions: Vec<ActionItem>,
 }
@@ -85,6 +184,7 @@ impl AppConfig {
                 default_cwd: None,
                 shell: None,
             },
+            zapret: None,
             actions: vec![
                 ActionItem {
                     id: "cargo-check".to_string(),

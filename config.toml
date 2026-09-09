@@ -6,4 +6,68 @@
 # default_cwd = "A:\\git_project1"
 # shell = "cmd"
 
-# Список действий пуст. Готов к добавлению новых команд!
+# --- Настройки Zapret (Flowseal) ---
+[zapret]
+path = "S:\\zapret"
+service_name = "zapret"
+github_repo = "Flowseal/zapret-discord-youtube"
+
+# ==========================================================
+# ДЕЙСТВИЯ: УПРАВЛЕНИЕ ZAPRET
+# ==========================================================
+
+[[actions]]
+id = "zapret-status"
+name = "Статус Zapret"
+description = "Проверка состояния службы, процессов winws, текущей стратегии и обновлений"
+category = "Zapret"
+command = "dark-cli zapret status"
+shortcut = "s"
+
+[[actions]]
+id = "zapret-start"
+name = "Запустить Zapret"
+description = "Запуск службы обхода блокировок (net start zapret)"
+category = "Zapret"
+command = "dark-cli zapret start"
+shortcut = "1"
+
+[[actions]]
+id = "zapret-stop"
+name = "Остановить Zapret"
+description = "Остановка службы и принудительное завершение процессов winws"
+category = "Zapret"
+command = "dark-cli zapret stop"
+shortcut = "0"
+
+[[actions]]
+id = "zapret-restart"
+name = "Перезапустить Zapret"
+description = "Быстрый перезапуск службы обходчика (stop -> wait -> start)"
+category = "Zapret"
+command = "dark-cli zapret restart"
+shortcut = "r"
+
+[[actions]]
+id = "zapret-update"
+name = "Обновить Zapret"
+description = "Скачать последний релиз с GitHub, сохранить списки пользователей, обновить файлы и запустить"
+category = "Zapret"
+command = "dark-cli zapret update"
+shortcut = "u"
+
+[[actions]]
+id = "zapret-open"
+name = "Открыть папку Zapret"
+description = "Открыть рабочую директорию Zapret в Проводнике Windows"
+category = "Zapret"
+command = "dark-cli zapret open"
+shortcut = "o"
+
+[[actions]]
+id = "zapret-manager"
+name = "Service.bat (Менеджер)"
+description = "Запустить оригинальный service.bat от имени администратора для настройки стратегий"
+category = "Zapret"
+command = "dark-cli zapret manager"
+shortcut = "m"
