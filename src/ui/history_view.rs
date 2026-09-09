@@ -12,7 +12,7 @@ pub fn render_history_view(f: &mut Frame, app: &App, area: Rect) {
         .border_type(BorderType::Rounded)
         .border_style(Theme::border())
         .title(Span::styled(
-            format!(" Execution History ({}) ", app.history.len()),
+            format!(" История запусков ({}) ", app.history.len()),
             Theme::title(),
         ));
 

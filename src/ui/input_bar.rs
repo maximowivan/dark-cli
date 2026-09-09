@@ -26,13 +26,13 @@ pub fn render_input_bar(f: &mut Frame, app: &App, area: Rect) {
     let p = match app.input_mode {
         InputMode::Normal => {
             let mut spans = vec![Span::raw(" ")];
-            spans.extend(make_hint("Enter", "Run"));
-            spans.extend(make_hint("↑↓", "Select"));
-            spans.extend(make_hint("/", "Search"));
-            spans.extend(make_hint(":", "Command"));
-            spans.extend(make_hint("Tab", "Tabs"));
-            spans.extend(make_hint("r", "Reload"));
-            spans.extend(make_hint("q", "Quit"));
+            spans.extend(make_hint("Enter", "Запуск"));
+            spans.extend(make_hint("↑↓", "Выбор"));
+            spans.extend(make_hint("/", "Поиск"));
+            spans.extend(make_hint(":", "Команда"));
+            spans.extend(make_hint("Tab", "Вкладки"));
+            spans.extend(make_hint("r", "Обновить"));
+            spans.extend(make_hint("q", "Выход"));
             Paragraph::new(Line::from(spans)).block(block)
         }
         InputMode::CommandInput => {

@@ -9,9 +9,9 @@ use ratatui::Frame;
 pub fn render_output_view(f: &mut Frame, app: &App, area: Rect) {
     if let Some(ref res) = app.last_result {
         let code_str = match res.exit_code {
-            Some(0) => "SUCCESS (0)".to_string(),
-            Some(code) => format!("FAILED ({})", code),
-            None => "ERROR".to_string(),
+            Some(0) => "УСПЕШНО (0)".to_string(),
+            Some(code) => format!("ОШИБКА ({})", code),
+            None => "СБОЙ".to_string(),
         };
 
         let status_style = if res.success {
@@ -21,13 +21,13 @@ pub fn render_output_view(f: &mut Frame, app: &App, area: Rect) {
         };
 
         let title_spans = Line::from(vec![
-            Span::styled(" Output: ", Theme::title()),
+            Span::styled(" Вывод: ", Theme::title()),
             Span::styled(&res.name, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
             Span::raw(" | "),
             Span::styled(format!("${} ", res.command), Style::default().fg(Color::Cyan)),
-            Span::raw("| Status: "),
+            Span::raw("| Статус: "),
             Span::styled(code_str, status_style),
-            Span::raw(" | Time: "),
+            Span::raw(" | Время: "),
             Span::styled(format!("{:.2?}", res.duration), Style::default().fg(Color::Yellow)),
         ]);
 
@@ -54,7 +54,7 @@ pub fn render_output_view(f: &mut Frame, app: &App, area: Rect) {
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(Theme::border())
-            .title(Span::styled(" Output Console ", Theme::title()));
+            .title(Span::styled(" Консоль вывода ", Theme::title()));
 
         let text = vec![
             Line::from(""),
@@ -65,7 +65,7 @@ pub fn render_output_view(f: &mut Frame, app: &App, area: Rect) {
             Line::from(""),
             Line::from(vec![
                 Span::styled("  Перейдите во вкладку ", Style::default().fg(Theme::MUTED)),
-                Span::styled("[1] Actions", Style::default().fg(Theme::PRIMARY).add_modifier(Modifier::BOLD)),
+                Span::styled("[1] Действия", Style::default().fg(Theme::PRIMARY).add_modifier(Modifier::BOLD)),
                 Span::styled(" и нажмите ", Style::default().fg(Theme::MUTED)),
                 Span::styled("[Enter]", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
                 Span::styled(" для запуска любого действия.", Style::default().fg(Theme::MUTED)),

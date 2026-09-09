@@ -42,7 +42,7 @@ pub fn render_actions_view(f: &mut Frame, app: &App, area: Rect) {
         })
         .collect();
 
-    let title_text = format!(" Actions ({}) ", filtered.len());
+    let title_text = format!(" Действия ({}) ", filtered.len());
     let list_block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
@@ -57,55 +57,55 @@ pub fn render_actions_view(f: &mut Frame, app: &App, area: Rect) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Theme::border())
-        .title(Span::styled(" Action Details ", Theme::title()));
+        .title(Span::styled(" Детали действия ", Theme::title()));
 
     if let Some((_, selected_action)) = filtered.get(app.selected_action_idx) {
-        let sc_text = selected_action.shortcut.as_deref().unwrap_or("None");
-        let cwd_text = selected_action.cwd.as_deref().unwrap_or("Current directory");
+        let sc_text = selected_action.shortcut.as_deref().unwrap_or("Нет");
+        let cwd_text = selected_action.cwd.as_deref().unwrap_or("Текущая папка");
 
         let lines = vec![
             Line::from(vec![
-                Span::styled("Name:        ", Style::default().fg(Theme::MUTED)),
+                Span::styled("Название:    ", Style::default().fg(Theme::MUTED)),
                 Span::styled(&selected_action.name, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
             ]),
             Line::from(vec![
-                Span::styled("ID:          ", Style::default().fg(Theme::MUTED)),
+                Span::styled("Код (ID):    ", Style::default().fg(Theme::MUTED)),
                 Span::styled(&selected_action.id, Style::default().fg(Color::Cyan)),
             ]),
             Line::from(vec![
-                Span::styled("Category:    ", Style::default().fg(Theme::MUTED)),
+                Span::styled("Категория:   ", Style::default().fg(Theme::MUTED)),
                 Span::styled(&selected_action.category, Theme::category_badge(&selected_action.category)),
             ]),
             Line::from(vec![
-                Span::styled("Shortcut:    ", Style::default().fg(Theme::MUTED)),
+                Span::styled("Клавиша:     ", Style::default().fg(Theme::MUTED)),
                 Span::styled(sc_text, Style::default().fg(Color::Yellow)),
             ]),
             Line::from(vec![
-                Span::styled("Working Dir: ", Style::default().fg(Theme::MUTED)),
+                Span::styled("Рабочая папка: ", Style::default().fg(Theme::MUTED)),
                 Span::styled(cwd_text, Style::default().fg(Color::Gray)),
             ]),
             Line::from(""),
             Line::from(vec![
-                Span::styled("Command:", Style::default().fg(Theme::PRIMARY).add_modifier(Modifier::BOLD)),
+                Span::styled("Команда:", Style::default().fg(Theme::PRIMARY).add_modifier(Modifier::BOLD)),
             ]),
             Line::from(vec![
                 Span::styled(format!("  $ {}", selected_action.command), Style::default().fg(Color::Green)),
             ]),
             Line::from(""),
             Line::from(vec![
-                Span::styled("Description:", Style::default().fg(Theme::PRIMARY).add_modifier(Modifier::BOLD)),
+                Span::styled("Описание:", Style::default().fg(Theme::PRIMARY).add_modifier(Modifier::BOLD)),
             ]),
             Line::from(vec![
                 Span::styled(format!("  {}", selected_action.description), Style::default().fg(Color::White)),
             ]),
             Line::from(""),
             Line::from(vec![
-                Span::styled("─── Hotkey ───", Style::default().fg(Theme::MUTED)),
+                Span::styled("─── Быстрый запуск ───", Style::default().fg(Theme::MUTED)),
             ]),
             Line::from(vec![
-                Span::styled("Press ", Style::default().fg(Theme::MUTED)),
+                Span::styled("Нажмите ", Style::default().fg(Theme::MUTED)),
                 Span::styled("[Enter]", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-                Span::styled(" to execute this action", Style::default().fg(Theme::MUTED)),
+                Span::styled(" для запуска этого действия", Style::default().fg(Theme::MUTED)),
             ]),
         ];
 

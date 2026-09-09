@@ -39,7 +39,7 @@ pub fn render_header(f: &mut Frame, app: &App, area: Rect) {
         .status_message
         .as_ref()
         .map(|(s, err)| (s.as_str(), *err))
-        .unwrap_or(("Ready", false));
+        .unwrap_or(("Готов к работе", false));
 
     let status_style = if is_err {
         Style::default().fg(Theme::ERROR).add_modifier(Modifier::BOLD)
@@ -79,10 +79,10 @@ pub fn render_header(f: &mut Frame, app: &App, area: Rect) {
     };
 
     let tabs_p = Paragraph::new(Line::from(vec![
-        make_tab_span("1:", "Actions", Tab::Actions),
-        make_tab_span("2:", "Output", Tab::Output),
-        make_tab_span("3:", "History", Tab::History),
-        make_tab_span("4:", "Help", Tab::Help),
+        make_tab_span("1:", "Действия", Tab::Actions),
+        make_tab_span("2:", "Вывод", Tab::Output),
+        make_tab_span("3:", "История", Tab::History),
+        make_tab_span("4:", "Справка", Tab::Help),
     ]))
     .block(tabs_block);
     f.render_widget(tabs_p, chunks[2]);

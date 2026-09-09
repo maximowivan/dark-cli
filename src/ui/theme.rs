@@ -46,10 +46,10 @@ impl Theme {
 
     pub fn category_badge(category: &str) -> Style {
         match category.to_lowercase().as_str() {
-            "development" | "dev" => Style::default().fg(Color::LightCyan),
+            "development" | "dev" | "разработка" => Style::default().fg(Color::LightCyan),
             "git" => Style::default().fg(Color::LightYellow),
-            "system" | "sys" => Style::default().fg(Color::LightMagenta),
-            "web" => Style::default().fg(Color::LightBlue),
+            "system" | "sys" | "система" => Style::default().fg(Color::LightMagenta),
+            "web" | "веб" => Style::default().fg(Color::LightBlue),
             _ => Style::default().fg(Color::LightGreen),
         }
     }

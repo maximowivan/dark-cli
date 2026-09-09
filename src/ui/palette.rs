@@ -16,7 +16,7 @@ pub fn render_palette(f: &mut Frame, app: &App, area: Rect) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Theme::PRIMARY).add_modifier(Modifier::BOLD))
-        .title(Span::styled(" ⚡ Command Palette (Fuzzy Search) ", Theme::title()));
+        .title(Span::styled(" ⚡ Палитра команд (Быстрый поиск) ", Theme::title()));
 
     let inner_area = outer_block.inner(modal_area);
     f.render_widget(outer_block, modal_area);
@@ -67,7 +67,7 @@ pub fn render_palette(f: &mut Frame, app: &App, area: Rect) {
         })
         .collect();
 
-    let results_title = format!(" Matches ({}) ", filtered.len());
+    let results_title = format!(" Найдено совпадений ({}) ", filtered.len());
     let list_block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)

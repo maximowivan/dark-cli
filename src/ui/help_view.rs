@@ -11,7 +11,7 @@ pub fn render_help_view(f: &mut Frame, app: &App, area: Rect) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Theme::border())
-        .title(Span::styled(" Quick Help & Keybindings ", Theme::title()));
+        .title(Span::styled(" Справка и горячие клавиши ", Theme::title()));
 
     let key_style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
     let section_style = Style::default().fg(Theme::PRIMARY).add_modifier(Modifier::BOLD);
