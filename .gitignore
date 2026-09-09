@@ -1,5 +1,8 @@
 # Rust build artifacts
 /target
+*.exe
+*.old
+*.new
 
 # IDE & editors
 .idea/
