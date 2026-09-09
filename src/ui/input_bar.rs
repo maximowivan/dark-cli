@@ -28,8 +28,8 @@ pub fn render_input_bar(f: &mut Frame, app: &App, area: Rect) {
             let mut spans = vec![Span::raw(" ")];
             spans.extend(make_hint("Enter", "Запуск"));
             spans.extend(make_hint("↑↓", "Выбор"));
+            spans.extend(make_hint("←→", "Группы"));
             spans.extend(make_hint("/", "Поиск"));
-            spans.extend(make_hint(":", "Команда"));
             spans.extend(make_hint("Tab", "Вкладки"));
             spans.extend(make_hint("r", "Обновить"));
             spans.extend(make_hint("q", "Выход"));

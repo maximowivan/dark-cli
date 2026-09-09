@@ -13,8 +13,55 @@ pub fn render_actions_view(f: &mut Frame, app: &App, area: Rect) {
         .split(area);
 
     let filtered = app.filtered_actions();
+    let categories = app.categories();
 
-    // Actions List (Left)
+    // Split left pane into: Category Bar (Top) + Actions List (Bottom)
+    let left_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(3)])
+        .split(chunks[0]);
+
+    // 1. Category Bar
+    let mut cat_spans = vec![Span::raw(" ")];
+    for (i, cat) in categories.iter().enumerate() {
+        let count = if i == 0 {
+            app.config.actions.len()
+        } else {
+            app.config.actions.iter().filter(|a| a.category.eq_ignore_ascii_case(cat)).count()
+        };
+        let is_selected = i == app.selected_category_idx;
+        let icon = match cat.to_lowercase().as_str() {
+            "zapret" => "⚡ ",
+            "разработка" | "dev" => "💻 ",
+            "система" | "system" => "🛠 ",
+            "git" => "🌿 ",
+            "веб" | "web" => "🌐 ",
+            _ => "📁 ",
+        };
+        let label = format!(" {}{}({}) ", if i == 0 { "✦ " } else { icon }, cat, count);
+        if is_selected {
+            cat_spans.push(Span::styled(
+                label,
+                Style::default().fg(Color::Black).bg(Theme::PRIMARY).add_modifier(Modifier::BOLD),
+            ));
+        } else {
+            cat_spans.push(Span::styled(
+                label,
+                Style::default().fg(Theme::MUTED),
+            ));
+        }
+        cat_spans.push(Span::raw(" "));
+    }
+
+    let cat_block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Theme::border())
+        .title(Span::styled(" Группы / Категории [← / →] ", Theme::title()));
+    let cat_p = Paragraph::new(Line::from(cat_spans)).block(cat_block);
+    f.render_widget(cat_p, left_chunks[0]);
+
+    // 2. Actions List
     let items: Vec<ListItem> = filtered
         .iter()
         .enumerate()
@@ -42,7 +89,8 @@ pub fn render_actions_view(f: &mut Frame, app: &App, area: Rect) {
         })
         .collect();
 
-    let title_text = format!(" Действия ({}) ", filtered.len());
+    let active_cat = categories.get(app.selected_category_idx).map(|s| s.as_str()).unwrap_or("Все");
+    let title_text = format!(" Действия: {} ({}) ", active_cat, filtered.len());
     let list_block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
@@ -50,7 +98,7 @@ pub fn render_actions_view(f: &mut Frame, app: &App, area: Rect) {
         .title(Span::styled(title_text, Theme::title()));
 
     let list_widget = List::new(items).block(list_block);
-    f.render_widget(list_widget, chunks[0]);
+    f.render_widget(list_widget, left_chunks[1]);
 
     // Detail Panel (Right)
     let detail_block = Block::default()

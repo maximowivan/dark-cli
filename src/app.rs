@@ -25,6 +25,7 @@ pub struct App {
     pub active_tab: Tab,
     pub input_mode: InputMode,
     pub input_buffer: String,
+    pub selected_category_idx: usize,
     pub selected_action_idx: usize,
     pub palette_selected_idx: usize,
     pub output_scroll: u16,
@@ -44,6 +45,7 @@ impl App {
             active_tab: Tab::Actions,
             input_mode: InputMode::Normal,
             input_buffer: String::new(),
+            selected_category_idx: 0,
             selected_action_idx: 0,
             palette_selected_idx: 0,
             output_scroll: 0,
@@ -56,17 +58,60 @@ impl App {
         }
     }
 
+    pub fn categories(&self) -> Vec<String> {
+        let mut cats = vec!["Все".to_string()];
+        for action in &self.config.actions {
+            if !cats.iter().any(|c| c.eq_ignore_ascii_case(&action.category)) {
+                cats.push(action.category.clone());
+            }
+        }
+        cats
+    }
+
+    pub fn next_category(&mut self) {
+        let cats = self.categories();
+        if !cats.is_empty() {
+            self.selected_category_idx = (self.selected_category_idx + 1) % cats.len();
+            self.selected_action_idx = 0;
+        }
+    }
+
+    pub fn prev_category(&mut self) {
+        let cats = self.categories();
+        if !cats.is_empty() {
+            if self.selected_category_idx == 0 {
+                self.selected_category_idx = cats.len() - 1;
+            } else {
+                self.selected_category_idx -= 1;
+            }
+            self.selected_action_idx = 0;
+        }
+    }
+
     pub fn filtered_actions(&self) -> Vec<(usize, &ActionItem)> {
+        let categories = self.categories();
+        let selected_cat = if self.selected_category_idx > 0 && self.selected_category_idx < categories.len() {
+            Some(&categories[self.selected_category_idx])
+        } else {
+            None
+        };
+
+        // 1. Filter by category
+        let base_iter = self.config.actions.iter().enumerate().filter(|(_, item)| {
+            if let Some(cat) = selected_cat {
+                item.category.eq_ignore_ascii_case(cat)
+            } else {
+                true
+            }
+        });
+
+        // 2. Filter by search query if any
         if self.input_buffer.is_empty() {
-            return self.config.actions.iter().enumerate().collect();
+            return base_iter.collect();
         }
 
         let query = &self.input_buffer;
-        let mut matches: Vec<(i64, usize, &ActionItem)> = self
-            .config
-            .actions
-            .iter()
-            .enumerate()
+        let mut matches: Vec<(i64, usize, &ActionItem)> = base_iter
             .filter_map(|(idx, item)| {
                 let target = format!("{} {} {} {}", item.name, item.id, item.category, item.description);
                 self.matcher.fuzzy_match(&target, query).map(|score| (score, idx, item))

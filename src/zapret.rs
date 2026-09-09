@@ -21,7 +21,7 @@ impl ZapretManager {
                 out.push_str(&format!("📁 Папка программы:   {}\n", path.display()));
             }
             None => {
-                out.push_str("📁 Папка программы:   [НЕ НАЙДЕНА] (укажите в config.toml)\n");
+                out.push_str("📁 Папка программы:   [НЕ УСТАНОВЛЕНА НА ЭТОМ ПК]\n");
             }
         }
 
@@ -41,8 +41,15 @@ impl ZapretManager {
         let local_version = resolved_path
             .as_ref()
             .and_then(|p| Self::get_local_version(p))
-            .unwrap_or_else(|| "Не определена".to_string());
-        out.push_str(&format!("📌 Установлена версия: {}\n", local_version));
+            .unwrap_or_else(|| "Не установлена".to_string());
+        out.push_str(&format!("📌 Локальная версия:  {}\n", local_version));
+
+        if resolved_path.is_none() {
+            out.push_str("\n💡 Zapret пока не обнаружен на этом компьютере.\n");
+            out.push_str("   Вы можете установить его в один клик:\n");
+            out.push_str("   Нажмите [u] ('Обновить / Установить Zapret') — программа автоматически\n");
+            out.push_str("   скачает последнюю версию с GitHub и распакует в C:\\zapret!\n");
+        }
 
         // 5. Проверка последнего релиза на GitHub
         out.push_str("\n🔍 Проверка последней версии на GitHub...\n");
@@ -116,13 +123,19 @@ impl ZapretManager {
         Ok(report)
     }
 
-    /// Обновить папку Zapret до последнего релиза на GitHub
+    /// Обновить папку Zapret или установить с нуля, если не найдена
     pub fn update(config: &ZapretConfig, force: bool) -> Result<String, String> {
-        let zapret_dir = config
-            .get_resolved_path()
-            .ok_or_else(|| "Папка Zapret не найдена! Укажите корректный путь в config.toml.".to_string())?;
+        let is_new_install = config.get_resolved_path().is_none();
+        let zapret_dir = config.get_resolved_path().unwrap_or_else(|| {
+            PathBuf::from("C:\\zapret")
+        });
 
         let mut log = String::new();
+        if is_new_install {
+            log.push_str("⚡ Zapret не найден на компьютере. Выполняется чистая установка с GitHub в C:\\zapret...\n");
+            let _ = fs::create_dir_all(&zapret_dir);
+        }
+
         log.push_str(&format!("📁 Целевая папка Zapret: {}\n", zapret_dir.display()));
 
         // 1. Получение информации о последнем релизе
@@ -132,7 +145,7 @@ impl ZapretManager {
         log.push_str(&format!("🔗 URL архива: {}\n\n", zip_url));
 
         let local_version = Self::get_local_version(&zapret_dir).unwrap_or_default();
-        if !force && !local_version.is_empty() && local_version.trim_start_matches('v') == latest_version.trim_start_matches('v') {
+        if !is_new_install && !force && !local_version.is_empty() && local_version.trim_start_matches('v') == latest_version.trim_start_matches('v') {
             return Ok(format!(
                 "✨ У вас уже установлена последняя версия ({})!\nОбновление не требуется. Для принудительной переустановки используйте флаг --force.",
                 local_version
@@ -245,7 +258,7 @@ impl ZapretManager {
     pub fn open_folder(config: &ZapretConfig) -> Result<String, String> {
         let path = config
             .get_resolved_path()
-            .ok_or_else(|| "Папка Zapret не найдена!".to_string())?;
+            .ok_or_else(|| "Папка Zapret не найдена на этом ПК! Нажмите [u] ('Обновить / Установить Zapret') для автоматической установки.".to_string())?;
 
         Command::new("explorer")
             .arg(&path)
@@ -259,7 +272,7 @@ impl ZapretManager {
     pub fn run_manager(config: &ZapretConfig) -> Result<String, String> {
         let path = config
             .get_resolved_path()
-            .ok_or_else(|| "Папка Zapret не найдена!".to_string())?;
+            .ok_or_else(|| "Папка Zapret не найдена на этом ПК! Нажмите [u] ('Обновить / Установить Zapret') для автоматической установки.".to_string())?;
 
         let service_bat = path.join("service.bat");
         if !service_bat.exists() {
@@ -388,18 +401,40 @@ impl ZapretManager {
     }
 
     fn run_powershell_script(script: &str) -> Result<String, String> {
+        let full_script = format!(
+            "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; \
+             $OutputEncoding = [System.Text.Encoding]::UTF8; \
+             {}",
+            script
+        );
+
         let output = Command::new("powershell")
-            .args(["-NoProfile", "-Command", script])
+            .args(["-NoProfile", "-Command", &full_script])
             .output()
             .map_err(|e| format!("Не удалось запустить PowerShell: {}", e))?;
 
-        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        let stdout = decode_bytes(&output.stdout);
+        let stderr = decode_bytes(&output.stderr);
 
         if !output.status.success() && stdout.trim().is_empty() {
             Err(stderr)
         } else {
             Ok(format!("{}{}", stdout, if stderr.is_empty() { "" } else { "\n" }).trim().to_string())
         }
+    }
+}
+
+fn decode_bytes(bytes: &[u8]) -> String {
+    if let Ok(s) = std::str::from_utf8(bytes) {
+        return s.to_string();
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use oem_cp::{Cp866, StringExt};
+        String::from_cp::<Cp866>(bytes)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        String::from_utf8_lossy(bytes).to_string()
     }
 }

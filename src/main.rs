@@ -269,6 +269,16 @@ fn main_loop(
                         KeyCode::Char('4') => app.active_tab = Tab::Help,
                         KeyCode::Tab => app.next_tab(),
                         KeyCode::BackTab => app.prev_tab(),
+                        KeyCode::Right | KeyCode::Char('l') => {
+                            if app.active_tab == Tab::Actions {
+                                app.next_category();
+                            }
+                        }
+                        KeyCode::Left | KeyCode::Char('h') => {
+                            if app.active_tab == Tab::Actions {
+                                app.prev_category();
+                            }
+                        }
                         KeyCode::Down | KeyCode::Char('j') => {
                             if app.active_tab == Tab::Actions {
                                 app.next_action();
