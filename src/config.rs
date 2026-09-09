@@ -223,13 +223,27 @@ pub struct AppConfig {
     pub actions: Vec<ActionItem>,
 }
 
+pub const DEFAULT_CONFIG_TOML: &str = include_str!("../config.toml");
+
 impl AppConfig {
     pub fn get_config_path() -> PathBuf {
+        // 1. Сначала проверяем рядом с исполняемым файлом (dark-cli.exe)
+        if let Ok(current_exe) = std::env::current_exe() {
+            if let Some(parent) = current_exe.parent() {
+                let exe_config = parent.join("config.toml");
+                if exe_config.exists() {
+                    return exe_config;
+                }
+            }
+        }
+
+        // 2. В текущей рабочей директории
         let local_path = Path::new("config.toml");
         if local_path.exists() {
             return local_path.to_path_buf();
         }
 
+        // 3. В глобальной папке пользователя (%APPDATA%\dark-cli\config.toml)
         if let Some(config_dir) = dirs::config_dir() {
             let app_dir = config_dir.join("dark-cli");
             let global_path = app_dir.join("config.toml");
@@ -238,7 +252,13 @@ impl AppConfig {
             }
         }
 
-        // Default to local config.toml
+        // По умолчанию создаем рядом с exe (чтобы лаунчер был полностью портативным)
+        if let Ok(current_exe) = std::env::current_exe() {
+            if let Some(parent) = current_exe.parent() {
+                return parent.join("config.toml");
+            }
+        }
+
         local_path.to_path_buf()
     }
 
@@ -249,11 +269,21 @@ impl AppConfig {
                 .map_err(|e| format!("Не удалось прочитать {}: {}", path.display(), e))?;
             let config: AppConfig = toml::from_str(&content)
                 .map_err(|e| format!("Ошибка парсинга {}: {}", path.display(), e))?;
+
+            // Если в конфиге остался старый тестовый шаблон (cargo check/build) и нет Zapret
+            let is_obsolete_sample = config.actions.iter().any(|a| a.id == "cargo-build" || a.id == "cargo-check")
+                && !config.actions.iter().any(|a| a.id.starts_with("zapret-") || a.id.starts_with("tg-proxy-"));
+
+            if is_obsolete_sample {
+                let default_cfg = Self::default_with_samples();
+                let _ = fs::write(&path, DEFAULT_CONFIG_TOML);
+                return Ok((default_cfg, path));
+            }
+
             Ok((config, path))
         } else {
             let default_config = Self::default_with_samples();
-            let toml_str = default_config.to_toml_string();
-            fs::write(&path, &toml_str)
+            fs::write(&path, DEFAULT_CONFIG_TOML)
                 .map_err(|e| format!("Не удалось создать {}: {}", path.display(), e))?;
             Ok((default_config, path))
         }
@@ -268,96 +298,7 @@ impl AppConfig {
     }
 
     pub fn default_with_samples() -> Self {
-        Self {
-            settings: Settings {
-                default_cwd: None,
-                shell: None,
-            },
-            zapret: None,
-            tg_proxy: None,
-            actions: vec![
-                ActionItem {
-                    id: "cargo-check".to_string(),
-                    name: "Проверка Cargo".to_string(),
-                    description: "Быстрая проверка компиляции без сборки исполняемого файла".to_string(),
-                    category: "Разработка".to_string(),
-                    command: "cargo check".to_string(),
-                    cwd: None,
-                    shortcut: Some("c".to_string()),
-                    env: None,
-                },
-                ActionItem {
-                    id: "cargo-build".to_string(),
-                    name: "Сборка Cargo".to_string(),
-                    description: "Сборка debug-бинарника проекта".to_string(),
-                    category: "Разработка".to_string(),
-                    command: "cargo build".to_string(),
-                    cwd: None,
-                    shortcut: Some("b".to_string()),
-                    env: None,
-                },
-                ActionItem {
-                    id: "cargo-test".to_string(),
-                    name: "Тесты Cargo".to_string(),
-                    description: "Запуск автоматических тестов".to_string(),
-                    category: "Разработка".to_string(),
-                    command: "cargo test".to_string(),
-                    cwd: None,
-                    shortcut: Some("t".to_string()),
-                    env: None,
-                },
-                ActionItem {
-                    id: "git-status".to_string(),
-                    name: "Статус Git".to_string(),
-                    description: "Просмотр статуса репозитория и изменений".to_string(),
-                    category: "Git".to_string(),
-                    command: "git status -s".to_string(),
-                    cwd: None,
-                    shortcut: Some("g".to_string()),
-                    env: None,
-                },
-                ActionItem {
-                    id: "git-log".to_string(),
-                    name: "История Git (Log)".to_string(),
-                    description: "Последние 10 коммитов в компактном виде".to_string(),
-                    category: "Git".to_string(),
-                    command: "git log --oneline -n 10 --graph".to_string(),
-                    cwd: None,
-                    shortcut: Some("l".to_string()),
-                    env: None,
-                },
-                ActionItem {
-                    id: "open-folder".to_string(),
-                    name: "Открыть папку".to_string(),
-                    description: "Открыть текущую папку в Проводнике Windows".to_string(),
-                    category: "Система".to_string(),
-                    command: "explorer .".to_string(),
-                    cwd: None,
-                    shortcut: Some("e".to_string()),
-                    env: None,
-                },
-                ActionItem {
-                    id: "sys-ip".to_string(),
-                    name: "Сетевые настройки".to_string(),
-                    description: "Показать текущие сетевые адреса (ipconfig)".to_string(),
-                    category: "Система".to_string(),
-                    command: "ipconfig".to_string(),
-                    cwd: None,
-                    shortcut: None,
-                    env: None,
-                },
-                ActionItem {
-                    id: "open-github".to_string(),
-                    name: "Открыть GitHub".to_string(),
-                    description: "Открыть сайт GitHub в браузере по умолчанию".to_string(),
-                    category: "Веб".to_string(),
-                    command: "cmd /c start https://github.com".to_string(),
-                    cwd: None,
-                    shortcut: None,
-                    env: None,
-                },
-            ],
-        }
+        toml::from_str(DEFAULT_CONFIG_TOML).unwrap_or_default()
     }
 
     pub fn save(&self, path: &Path) -> Result<(), String> {
@@ -438,12 +379,10 @@ mod tests {
     #[test]
     fn test_default_config_parse() {
         let default_cfg = AppConfig::default_with_samples();
-        let toml_str = default_cfg.to_toml_string();
-        let parsed: Result<AppConfig, _> = toml::from_str(&toml_str);
-        assert!(parsed.is_ok(), "Config should deserialize cleanly from toml string");
-        let parsed = parsed.unwrap();
-        assert_eq!(parsed.actions.len(), default_cfg.actions.len());
-        assert_eq!(parsed.actions[0].id, "cargo-check");
+        assert!(default_cfg.zapret.is_some(), "Default config should have Zapret section");
+        assert!(default_cfg.tg_proxy.is_some(), "Default config should have TgProxy section");
+        assert!(default_cfg.actions.iter().any(|a| a.id == "zapret-status"));
+        assert!(default_cfg.actions.iter().any(|a| a.id == "tg-proxy-status"));
     }
 
     #[test]

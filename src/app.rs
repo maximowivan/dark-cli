@@ -557,14 +557,15 @@ mod tests {
         // No query: all actions returned
         assert_eq!(app.filtered_actions().len(), app.config.actions.len());
 
-        // Filter by "cargo"
-        app.input_buffer = "cargo".to_string();
+        // Filter by "zapret"
+        app.input_buffer = "zapret".to_string();
         let filtered = app.filtered_actions();
         assert!(!filtered.is_empty());
         for (_, action) in &filtered {
-            let matches = action.name.to_lowercase().contains("cargo")
-                || action.command.to_lowercase().contains("cargo")
-                || action.category.to_lowercase().contains("cargo");
+            let matches = action.name.to_lowercase().contains("zapret")
+                || action.command.to_lowercase().contains("zapret")
+                || action.category.to_lowercase().contains("zapret")
+                || action.id.to_lowercase().contains("zapret");
             assert!(matches);
         }
 
