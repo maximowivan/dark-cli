@@ -500,6 +500,10 @@ fn main_loop(
             break;
         }
 
+        if app.last_status_refresh.elapsed() > Duration::from_secs(10) {
+            app.refresh_statuses();
+        }
+
         if let Some(action) = app.pending_action.take() {
             app.execute_action(&action);
             terminal.draw(|f| ui::render(f, app))?;

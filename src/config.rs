@@ -55,6 +55,7 @@ impl Default for ZapretConfig {
 }
 
 impl ZapretConfig {
+    #[allow(dead_code)]
     pub fn is_installed(&self) -> bool {
         self.get_resolved_path().is_some()
     }
@@ -175,17 +176,7 @@ impl TgProxyConfig {
             }
         }
 
-        // 2. Try detecting from running process on Windows
-        #[cfg(target_os = "windows")]
-        {
-            if let Some(proc_path) = Self::detect_from_running_process() {
-                if proc_path.exists() {
-                    return Some(proc_path);
-                }
-            }
-        }
-
-        // 3. Check common locations
+        // 2. Check common locations on disk (instant 0.001ms check)
         let mut candidates = Vec::new();
         if let Some(home) = dirs::home_dir() {
             candidates.push(home.join("Downloads").join("TgWsProxy_windows.exe"));
@@ -204,30 +195,6 @@ impl TgProxyConfig {
             }
         }
 
-        None
-    }
-
-    #[cfg(target_os = "windows")]
-    pub fn detect_from_running_process() -> Option<PathBuf> {
-        use std::process::Command;
-        let output = Command::new("powershell")
-            .args([
-                "-NoProfile",
-                "-Command",
-                "Get-Process -Name *tgws*, *TgWsProxy* -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Path -First 1",
-            ])
-            .output()
-            .ok()?;
-
-        if output.status.success() {
-            let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !path_str.is_empty() {
-                let pb = PathBuf::from(&path_str);
-                if pb.exists() {
-                    return Some(pb);
-                }
-            }
-        }
         None
     }
 

@@ -35,7 +35,11 @@ impl TgProxyManager {
         let is_running = !pids.is_empty();
 
         let (host, port, secret) = Self::read_config_json(config.default_port);
-        let is_port_listening = Self::check_port_listening(&host, port);
+        let is_port_listening = if is_running {
+            Self::check_port_listening(&host, port)
+        } else {
+            false
+        };
 
         let config_file = TgProxyConfig::get_config_json_path().filter(|p| p.exists());
         let log_file = TgProxyConfig::get_log_file_path().filter(|p| p.exists());
@@ -543,30 +547,6 @@ impl TgProxyManager {
             }
         }
 
-        // 4. Проверяем метаданные PE файла (ProductVersion) через PowerShell
-        #[cfg(target_os = "windows")]
-        if exe.exists() {
-            let script = format!(
-                "(Get-Item '{}' -ErrorAction SilentlyContinue).VersionInfo.ProductVersion",
-                exe.display()
-            );
-            if let Ok(out) = Self::run_powershell(&script) {
-                let trimmed = out.trim();
-                if !trimmed.is_empty() && trimmed != "0.0.0.0" {
-                    let parts: Vec<&str> = trimmed.split('.').collect();
-                    if parts.len() >= 2 {
-                        let short = if parts.len() >= 3 && parts[2] != "0" {
-                            format!("{}.{}.{}", parts[0], parts[1], parts[2])
-                        } else {
-                            format!("{}.{}", parts[0], parts[1])
-                        };
-                        return Some(format!("v{}", short));
-                    }
-                    return Some(format!("v{}", trimmed.trim_start_matches('v')));
-                }
-            }
-        }
-
         None
     }
 
@@ -575,12 +555,27 @@ impl TgProxyManager {
     fn get_running_pids() -> Vec<u32> {
         #[cfg(target_os = "windows")]
         {
-            let script = "Get-Process -Name *tgws*, *TgWsProxy* -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id";
-            if let Ok(output) = Self::run_powershell(script) {
-                return output
-                    .lines()
-                    .filter_map(|l| l.trim().parse::<u32>().ok())
-                    .collect();
+            // Используем быстрый встроенный tasklist вместо тяжелого PowerShell
+            if let Ok(output) = Command::new("tasklist")
+                .args(["/FI", "IMAGENAME eq TgWsProxy*", "/FO", "CSV", "/NH"])
+                .output()
+            {
+                let text = String::from_utf8_lossy(&output.stdout);
+                let mut pids = Vec::new();
+                for line in text.lines() {
+                    let trimmed = line.trim();
+                    if trimmed.is_empty() || trimmed.starts_with("INFO:") {
+                        continue;
+                    }
+                    let parts: Vec<&str> = trimmed.split(',').collect();
+                    if parts.len() >= 2 {
+                        let pid_str = parts[1].trim().trim_matches('"');
+                        if let Ok(pid) = pid_str.parse::<u32>() {
+                            pids.push(pid);
+                        }
+                    }
+                }
+                return pids;
             }
         }
         Vec::new()
@@ -589,7 +584,7 @@ impl TgProxyManager {
     fn check_port_listening(host: &str, port: u16) -> bool {
         let addr_str = if host == "0.0.0.0" || host.is_empty() { "127.0.0.1" } else { host };
         if let Ok(addr) = format!("{}:{}", addr_str, port).parse::<SocketAddr>() {
-            TcpStream::connect_timeout(&addr, Duration::from_millis(600)).is_ok()
+            TcpStream::connect_timeout(&addr, Duration::from_millis(100)).is_ok()
         } else {
             false
         }

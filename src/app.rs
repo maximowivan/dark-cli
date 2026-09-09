@@ -50,12 +50,21 @@ pub struct App {
     pub install_dialog: Option<InstallDialogState>,
     pub pending_action: Option<ActionItem>,
     pub executing_action: Option<ActionItem>,
+    pub zapret_installed: bool,
+    pub zapret_path: Option<PathBuf>,
+    pub zapret_version: Option<String>,
+    pub tg_proxy_installed: bool,
+    pub tg_proxy_path: Option<PathBuf>,
+    pub tg_proxy_version: Option<String>,
+    pub tg_proxy_running: bool,
+    pub tg_proxy_port: u16,
+    pub last_status_refresh: std::time::Instant,
     matcher: SkimMatcherV2,
 }
 
 impl App {
     pub fn new(config: AppConfig, config_path: PathBuf) -> Self {
-        Self {
+        let mut app = Self {
             config,
             config_path,
             active_tab: Tab::Actions,
@@ -73,8 +82,19 @@ impl App {
             install_dialog: None,
             pending_action: None,
             executing_action: None,
+            zapret_installed: false,
+            zapret_path: None,
+            zapret_version: None,
+            tg_proxy_installed: false,
+            tg_proxy_path: None,
+            tg_proxy_version: None,
+            tg_proxy_running: false,
+            tg_proxy_port: 1443,
+            last_status_refresh: std::time::Instant::now(),
             matcher: SkimMatcherV2::default(),
-        }
+        };
+        app.refresh_statuses();
+        app
     }
 
     pub fn categories(&self) -> Vec<String> {
@@ -163,50 +183,60 @@ impl App {
         }
     }
 
+    pub fn refresh_statuses(&mut self) {
+        // 1. Zapret
+        let default_zcfg = crate::config::ZapretConfig::default();
+        let zcfg = self.config.zapret.as_ref().unwrap_or(&default_zcfg);
+        let (z_inst, z_p, z_v) = crate::zapret::ZapretManager::get_install_summary(zcfg);
+        self.zapret_installed = z_inst;
+        self.zapret_path = z_p;
+        self.zapret_version = z_v;
+
+        // 2. TG Proxy
+        let default_tp_cfg = crate::config::TgProxyConfig::default();
+        let tp_cfg = self.config.tg_proxy.as_ref().unwrap_or(&default_tp_cfg);
+        let summary = crate::tg_proxy::TgProxyManager::get_summary(tp_cfg);
+        self.tg_proxy_installed = summary.is_installed;
+        self.tg_proxy_path = summary.exe_path;
+        self.tg_proxy_version = summary.version;
+        self.tg_proxy_running = summary.is_running;
+        self.tg_proxy_port = summary.port;
+
+        self.last_status_refresh = std::time::Instant::now();
+    }
+
     pub fn is_zapret_installed(&self) -> bool {
-        self.config.zapret.as_ref().map(|z| z.is_installed()).unwrap_or(false)
-            || crate::config::ZapretConfig::default().is_installed()
+        self.zapret_installed
     }
 
     pub fn get_zapret_path(&self) -> Option<PathBuf> {
-        self.config.zapret.as_ref().and_then(|z| z.get_resolved_path())
-            .or_else(|| crate::config::ZapretConfig::default().get_resolved_path())
+        self.zapret_path.clone()
     }
 
     pub fn get_zapret_summary(&self) -> (bool, Option<PathBuf>, Option<String>) {
-        let default_cfg = crate::config::ZapretConfig::default();
-        let cfg = self.config.zapret.as_ref().unwrap_or(&default_cfg);
-        crate::zapret::ZapretManager::get_install_summary(cfg)
+        (self.zapret_installed, self.zapret_path.clone(), self.zapret_version.clone())
     }
 
     pub fn is_tg_proxy_installed(&self) -> bool {
-        self.config.tg_proxy.as_ref().map(|tp| tp.is_installed()).unwrap_or(false)
-            || crate::config::TgProxyConfig::default().is_installed()
+        self.tg_proxy_installed
     }
 
     pub fn get_tg_proxy_path(&self) -> Option<PathBuf> {
-        self.config.tg_proxy.as_ref().and_then(|tp| tp.get_resolved_path())
-            .or_else(|| crate::config::TgProxyConfig::default().get_resolved_path())
+        self.tg_proxy_path.clone()
     }
 
     pub fn get_tg_proxy_summary(&self) -> (bool, Option<PathBuf>, Option<String>, bool, u16) {
-        let default_cfg = crate::config::TgProxyConfig::default();
-        let cfg = self.config.tg_proxy.as_ref().unwrap_or(&default_cfg);
-        let summary = crate::tg_proxy::TgProxyManager::get_summary(cfg);
         (
-            summary.is_installed,
-            summary.exe_path,
-            summary.version,
-            summary.is_running,
-            summary.port,
+            self.tg_proxy_installed,
+            self.tg_proxy_path.clone(),
+            self.tg_proxy_version.clone(),
+            self.tg_proxy_running,
+            self.tg_proxy_port,
         )
     }
 
     pub fn get_tg_proxy_running_state(&self) -> (bool, u16) {
-        let default_cfg = crate::config::TgProxyConfig::default();
-        let cfg = self.config.tg_proxy.as_ref().unwrap_or(&default_cfg);
-        let summary = crate::tg_proxy::TgProxyManager::get_summary(cfg);
-        (summary.is_running, summary.port)
+        (self.tg_proxy_running, self.tg_proxy_port)
     }
 
     pub fn start_zapret_install_dialog(&mut self) {
@@ -311,6 +341,7 @@ impl App {
         self.executing_action = None;
         self.output_scroll = 0;
         self.active_tab = Tab::Output;
+        self.refresh_statuses();
     }
 
     pub fn execute_action_by_id(&mut self, id: &str) -> bool {
@@ -361,6 +392,7 @@ impl App {
         match AppConfig::reload(&self.config_path) {
             Ok(new_config) => {
                 self.config = new_config;
+                self.refresh_statuses();
                 self.selected_action_idx = 0;
                 self.set_status("Конфигурация успешно перезагружена!", false);
             }
