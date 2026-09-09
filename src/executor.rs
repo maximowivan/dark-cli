@@ -31,7 +31,7 @@ impl CommandExecutor {
                     &action.command[13..]
                 };
                 let mut c = Command::new(current_exe);
-                c.args(sub.split_whitespace());
+                c.args(split_cmd_args(sub));
                 c
             } else if cfg!(target_os = "windows") {
                 let mut c = Command::new("cmd");
@@ -128,3 +128,43 @@ fn decode_bytes(bytes: &[u8]) -> String {
         String::from_utf8_lossy(bytes).to_string()
     }
 }
+
+fn split_cmd_args(cmd_str: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut current = String::new();
+    let mut in_quotes = false;
+    let mut quote_char = ' ';
+
+    for ch in cmd_str.chars() {
+        if (ch == '"' || ch == '\'') && (!in_quotes || ch == quote_char) {
+            in_quotes = !in_quotes;
+            quote_char = ch;
+        } else if ch.is_whitespace() && !in_quotes {
+            if !current.is_empty() {
+                args.push(current.clone());
+                current.clear();
+            }
+        } else {
+            current.push(ch);
+        }
+    }
+    if !current.is_empty() {
+        args.push(current);
+    }
+    args
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_split_cmd_args() {
+        let args = split_cmd_args("zapret service-install --strategy \"general (ALT11)\"");
+        assert_eq!(args, vec!["zapret", "service-install", "--strategy", "general (ALT11)"]);
+
+        let args2 = split_cmd_args("tg-proxy update --path 'C:\\Program Files\\tg'");
+        assert_eq!(args2, vec!["tg-proxy", "update", "--path", "C:\\Program Files\\tg"]);
+    }
+}
+

@@ -39,16 +39,22 @@ impl TgProxyManager {
         let log_file = TgProxyConfig::get_log_file_path().filter(|p| p.exists());
 
         let secret_str = secret.as_deref().unwrap_or("");
-        let tg_link = if secret_str.is_empty() {
-            format!("tg://proxy?server={}&port={}", host, port)
+        let effective_secret = if secret_str.len() == 32 && !secret_str.starts_with("dd") && !secret_str.starts_with("ee") {
+            format!("dd{}", secret_str)
         } else {
-            format!("tg://proxy?server={}&port={}&secret={}", host, port, secret_str)
+            secret_str.to_string()
         };
 
-        let web_link = if secret_str.is_empty() {
+        let tg_link = if effective_secret.is_empty() {
+            format!("tg://proxy?server={}&port={}", host, port)
+        } else {
+            format!("tg://proxy?server={}&port={}&secret={}", host, port, effective_secret)
+        };
+
+        let web_link = if effective_secret.is_empty() {
             format!("https://t.me/proxy?server={}&port={}", host, port)
         } else {
-            format!("https://t.me/proxy?server={}&port={}&secret={}", host, port, secret_str)
+            format!("https://t.me/proxy?server={}&port={}&secret={}", host, port, effective_secret)
         };
 
         TgProxySummary {
@@ -174,13 +180,17 @@ impl TgProxyManager {
             }
         };
 
-        // Запуск процесса в фоновом режиме (системный трей)
+        // Запуск процесса в фоновом режиме (системный трей) через Start-Process
+        // Это предотвращает наследование дескрипторов ввода-вывода (stdout/stderr pipes)
         #[cfg(target_os = "windows")]
         {
             let parent_dir = exe.parent().unwrap_or_else(|| Path::new("."));
-            Command::new(&exe)
-                .current_dir(parent_dir)
-                .spawn()
+            let script = format!(
+                "Start-Process -FilePath '{}' -WorkingDirectory '{}'",
+                exe.display(),
+                parent_dir.display()
+            );
+            Self::run_powershell(&script)
                 .map_err(|e| format!("Не удалось запустить {}: {}", exe.display(), e))?;
         }
 
@@ -191,26 +201,44 @@ impl TgProxyManager {
                 .map_err(|e| format!("Не удалось запустить {}: {}", exe.display(), e))?;
         }
 
-        // Ждем поднятия прокси до 3 секунд
-        for _ in 0..6 {
+        // Ждем поднятия прокси и открытия порта (до 6 секунд)
+        for _ in 0..12 {
             sleep(Duration::from_millis(500));
             let new_summary = Self::get_summary(config);
             if new_summary.is_running && new_summary.is_port_listening {
                 return Ok(format!(
-                    "✅ TG WS Proxy успешно запущен!\n\
+                    "✅ TG WS Proxy успешно запущен и слушает подключения!\n\
                      ⚡ Процесс: PID {}\n\
                      🌐 Порт: {}:{}\n\
+                     🔑 Secret: {}\n\
                      🔗 Ссылка: {}\n\n\
                      Значок программы появился в системном трее Windows рядом с часами.",
                     new_summary.pids.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(", "),
                     new_summary.host,
                     new_summary.port,
+                    new_summary.secret.as_deref().unwrap_or("[авто]"),
                     new_summary.tg_link
                 ));
+            } else if new_summary.is_running {
+                // Если процесс уже есть, дадим еще немного времени сокету
+                continue;
             }
         }
 
-        Ok("TG WS Proxy запущен (ожидает инициализации сокетов). Проверьте статус через клавишу [s].".to_string())
+        let fallback_summary = Self::get_summary(config);
+        if fallback_summary.is_running {
+            Ok(format!(
+                "✅ TG WS Proxy запущен (PID: {}). Сокет инициализируется.\n\
+                 🌐 Порт: {}:{}\n\
+                 🔗 Ссылка: {}",
+                fallback_summary.pids.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(", "),
+                fallback_summary.host,
+                fallback_summary.port,
+                fallback_summary.tg_link
+            ))
+        } else {
+            Ok("TG WS Proxy запущен (ожидает инициализации сокетов). Проверьте статус через клавишу [s].".to_string())
+        }
     }
 
     /// Остановить все процессы TG WS Proxy
@@ -226,8 +254,9 @@ impl TgProxyManager {
                 .args(["/F", "/IM", "TgWsProxy_windows.exe"])
                 .output();
             let _ = Command::new("taskkill")
-                .args(["/F", "/IM", "TgWsProxy*.exe"])
+                .args(["/F", "/FI", "IMAGENAME eq TgWsProxy*"])
                 .output();
+            let _ = Self::run_powershell("Stop-Process -Name *tgws*, *TgWsProxy* -Force -ErrorAction SilentlyContinue");
         }
 
         sleep(Duration::from_millis(500));
@@ -250,7 +279,7 @@ impl TgProxyManager {
     /// Подключить в Telegram Desktop (открыть tg://proxy)
     pub fn connect_telegram(config: &TgProxyConfig) -> Result<String, String> {
         let summary = Self::get_summary(config);
-        if !summary.is_running || !summary.is_port_listening {
+        if !summary.is_running {
             let _ = Self::start(config);
             sleep(Duration::from_millis(1000));
         }
@@ -259,10 +288,8 @@ impl TgProxyManager {
 
         #[cfg(target_os = "windows")]
         {
-            Command::new("cmd")
-                .args(["/c", "start", "", &link])
-                .spawn()
-                .map_err(|e| format!("Не удалось открыть ссылку в Telegram Desktop: {}", e))?;
+            let script = format!("Start-Process '{}'", link);
+            let _ = Self::run_powershell(&script);
         }
 
         Ok(format!(
@@ -326,15 +353,10 @@ impl TgProxyManager {
 
     /// Открыть папку с файлом программы или логами в Проводнике
     pub fn open_folder(config: &TgProxyConfig) -> Result<String, String> {
-        let folder = config
-            .get_resolved_path()
-            .and_then(|p| p.parent().map(|p| p.to_path_buf()))
-            .or_else(TgProxyConfig::get_appdata_dir);
+        let appdata = TgProxyConfig::get_appdata_dir().filter(|p| p.exists());
+        let exe_dir = config.get_resolved_path().and_then(|p| p.parent().map(|p| p.to_path_buf()));
 
-        let target = match folder {
-            Some(f) if f.exists() => f,
-            _ => PathBuf::from("C:\\"),
-        };
+        let target = appdata.or(exe_dir).unwrap_or_else(|| PathBuf::from("C:\\"));
 
         Command::new("explorer")
             .arg(&target)
@@ -425,7 +447,7 @@ impl TgProxyManager {
     fn check_port_listening(host: &str, port: u16) -> bool {
         let addr_str = if host == "0.0.0.0" || host.is_empty() { "127.0.0.1" } else { host };
         if let Ok(addr) = format!("{}:{}", addr_str, port).parse::<SocketAddr>() {
-            TcpStream::connect_timeout(&addr, Duration::from_millis(250)).is_ok()
+            TcpStream::connect_timeout(&addr, Duration::from_millis(600)).is_ok()
         } else {
             false
         }
