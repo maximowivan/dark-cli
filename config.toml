@@ -10,6 +10,11 @@ path = "C:\\zapret"
 service_name = "zapret"
 github_repo = "Flowseal/zapret-discord-youtube"
 
+[tg_proxy]
+path = "C:\\Users\\maxim\\Downloads\\TgWsProxy_windows.exe"
+github_repo = "Flowseal/tg-ws-proxy"
+default_port = 1443
+
 [[actions]]
 id = "zapret-status"
 name = "Статус Zapret"
@@ -98,3 +103,78 @@ category = "Zapret"
 command = "dark-cli zapret manager"
 shortcut = "m"
 
+# ==========================================================
+# ДЕЙСТВИЯ: FLOWSEAL TG WS PROXY (TELEGRAM)
+# ==========================================================
+
+[[actions]]
+id = "tg-proxy-status"
+name = "Статус TG WS Proxy"
+description = "Проверка процесса, порта 1443, файла настроек, ключа secret и релизов"
+category = "Telegram Proxy"
+command = "dark-cli tg-proxy status"
+shortcut = "s"
+
+[[actions]]
+id = "tg-proxy-start"
+name = "Запустить TG WS Proxy"
+description = "Запуск MTProto WS прокси в фоновом режиме (появится иконка в трее Windows)"
+category = "Telegram Proxy"
+command = "dark-cli tg-proxy start"
+shortcut = "1"
+
+[[actions]]
+id = "tg-proxy-stop"
+name = "Остановить TG WS Proxy"
+description = "Завершение всех активных процессов TgWsProxy_windows.exe"
+category = "Telegram Proxy"
+command = "dark-cli tg-proxy stop"
+shortcut = "0"
+
+[[actions]]
+id = "tg-proxy-restart"
+name = "Перезапустить TG WS Proxy"
+description = "Быстрый перезапуск прокси для сброса активных сессий или применения конфига"
+category = "Telegram Proxy"
+command = "dark-cli tg-proxy restart"
+shortcut = "r"
+
+[[actions]]
+id = "tg-proxy-connect"
+name = "Подключить в Telegram (1 клик)"
+description = "Мгновенное открытие окна подтверждения подключения прокси в Telegram Desktop (tg://proxy)"
+category = "Telegram Proxy"
+command = "dark-cli tg-proxy connect"
+shortcut = "c"
+
+[[actions]]
+id = "tg-proxy-copy-link"
+name = "Скопировать ссылку прокси"
+description = "Скопировать готовую ссылку tg://proxy в буфер обмена Windows"
+category = "Telegram Proxy"
+command = "dark-cli tg-proxy copy-link"
+shortcut = "y"
+
+[[actions]]
+id = "tg-proxy-update"
+name = "Обновить / Скачать с GitHub"
+description = "Скачивание актуального релиза TgWsProxy_windows.exe с официального репозитория Flowseal"
+category = "Telegram Proxy"
+command = "dark-cli tg-proxy update"
+shortcut = "u"
+
+[[actions]]
+id = "tg-proxy-logs"
+name = "Журнал прокси (proxy.log)"
+description = "Просмотр последних строк журнала событий proxy.log прямо в окне вывода"
+category = "Telegram Proxy"
+command = "dark-cli tg-proxy logs"
+shortcut = "l"
+
+[[actions]]
+id = "tg-proxy-open"
+name = "Открыть папку с прокси"
+description = "Открыть каталог с исполняемым файлом и логами в Проводнике Windows"
+category = "Telegram Proxy"
+command = "dark-cli tg-proxy open"
+shortcut = "o"

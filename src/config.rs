@@ -128,12 +128,130 @@ impl ZapretConfig {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TgProxyConfig {
+    pub path: Option<String>,
+    #[serde(default = "default_tg_proxy_repo")]
+    pub github_repo: String,
+    #[serde(default = "default_tg_proxy_port")]
+    pub default_port: u16,
+}
+
+fn default_tg_proxy_repo() -> String {
+    "Flowseal/tg-ws-proxy".to_string()
+}
+
+fn default_tg_proxy_port() -> u16 {
+    1443
+}
+
+impl Default for TgProxyConfig {
+    fn default() -> Self {
+        Self {
+            path: None,
+            github_repo: default_tg_proxy_repo(),
+            default_port: default_tg_proxy_port(),
+        }
+    }
+}
+
+impl TgProxyConfig {
+    #[allow(dead_code)]
+    pub fn is_installed(&self) -> bool {
+        self.get_resolved_path().is_some()
+    }
+
+    pub fn get_resolved_path(&self) -> Option<PathBuf> {
+        // 1. If path is configured in config
+        if let Some(ref p) = self.path {
+            let pb = PathBuf::from(p);
+            if pb.is_file() {
+                return Some(pb);
+            } else if pb.is_dir() {
+                let candidate = pb.join("TgWsProxy_windows.exe");
+                if candidate.exists() {
+                    return Some(candidate);
+                }
+            }
+        }
+
+        // 2. Try detecting from running process on Windows
+        #[cfg(target_os = "windows")]
+        {
+            if let Some(proc_path) = Self::detect_from_running_process() {
+                if proc_path.exists() {
+                    return Some(proc_path);
+                }
+            }
+        }
+
+        // 3. Check common locations
+        let mut candidates = Vec::new();
+        if let Some(home) = dirs::home_dir() {
+            candidates.push(home.join("Downloads").join("TgWsProxy_windows.exe"));
+            candidates.push(home.join("Desktop").join("TgWsProxy_windows.exe"));
+        }
+        if let Some(config_dir) = dirs::config_dir() {
+            candidates.push(config_dir.join("TgWsProxy").join("TgWsProxy_windows.exe"));
+        }
+        candidates.push(PathBuf::from("C:\\tg-ws-proxy\\TgWsProxy_windows.exe"));
+        candidates.push(PathBuf::from("S:\\tg-ws-proxy\\TgWsProxy_windows.exe"));
+        candidates.push(PathBuf::from("C:\\zapret\\TgWsProxy_windows.exe"));
+
+        for c in candidates {
+            if c.exists() {
+                return Some(c);
+            }
+        }
+
+        None
+    }
+
+    #[cfg(target_os = "windows")]
+    pub fn detect_from_running_process() -> Option<PathBuf> {
+        use std::process::Command;
+        let output = Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-Command",
+                "Get-Process -Name *tgws*, *TgWsProxy* -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Path -First 1",
+            ])
+            .output()
+            .ok()?;
+
+        if output.status.success() {
+            let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path_str.is_empty() {
+                let pb = PathBuf::from(&path_str);
+                if pb.exists() {
+                    return Some(pb);
+                }
+            }
+        }
+        None
+    }
+
+    pub fn get_appdata_dir() -> Option<PathBuf> {
+        dirs::config_dir().map(|d| d.join("TgWsProxy"))
+    }
+
+    pub fn get_config_json_path() -> Option<PathBuf> {
+        Self::get_appdata_dir().map(|d| d.join("config.json"))
+    }
+
+    pub fn get_log_file_path() -> Option<PathBuf> {
+        Self::get_appdata_dir().map(|d| d.join("proxy.log"))
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AppConfig {
     #[serde(default)]
     pub settings: Settings,
     #[serde(default)]
     pub zapret: Option<ZapretConfig>,
+    #[serde(default)]
+    pub tg_proxy: Option<TgProxyConfig>,
     #[serde(default)]
     pub actions: Vec<ActionItem>,
 }
@@ -189,6 +307,7 @@ impl AppConfig {
                 shell: None,
             },
             zapret: None,
+            tg_proxy: None,
             actions: vec![
                 ActionItem {
                     id: "cargo-check".to_string(),
@@ -289,6 +408,16 @@ impl AppConfig {
         }
     }
 
+    pub fn set_tg_proxy_path(&mut self, path: String) {
+        if let Some(ref mut tp) = self.tg_proxy {
+            tp.path = Some(path);
+        } else {
+            let mut tp = TgProxyConfig::default();
+            tp.path = Some(path);
+            self.tg_proxy = Some(tp);
+        }
+    }
+
     pub fn to_toml_string(&self) -> String {
         let mut out = String::new();
         out.push_str("# Конфигурационный файл Dark CLI / Launcher\n");
@@ -304,6 +433,15 @@ impl AppConfig {
             }
             out.push_str(&format!("service_name = {:?}\n", z.service_name));
             out.push_str(&format!("github_repo = {:?}\n\n", z.github_repo));
+        }
+
+        if let Some(ref tp) = self.tg_proxy {
+            out.push_str("[tg_proxy]\n");
+            if let Some(ref p) = tp.path {
+                out.push_str(&format!("path = {:?}\n", p));
+            }
+            out.push_str(&format!("github_repo = {:?}\n", tp.github_repo));
+            out.push_str(&format!("default_port = {}\n\n", tp.default_port));
         }
 
         for action in &self.actions {

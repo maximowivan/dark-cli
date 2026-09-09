@@ -1,6 +1,7 @@
 mod app;
 mod config;
 mod executor;
+mod tg_proxy;
 mod ui;
 mod zapret;
 
@@ -16,6 +17,7 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io::{self, stdout};
 use std::panic;
 use std::time::Duration;
+use tg_proxy::TgProxyManager;
 use zapret::ZapretManager;
 
 #[derive(Parser)]
@@ -41,6 +43,11 @@ enum Commands {
     Zapret {
         #[command(subcommand)]
         action: ZapretCommands,
+    },
+    /// Управление локальным MTProto WebSocket прокси для Telegram (Flowseal tg-ws-proxy)
+    TgProxy {
+        #[command(subcommand)]
+        action: TgProxyCommands,
     },
 }
 
@@ -83,6 +90,41 @@ enum ZapretCommands {
     EasySetup,
     /// Запустить оригинальный service.bat от имени администратора
     Manager,
+}
+
+#[derive(Subcommand)]
+enum TgProxyCommands {
+    /// Проверить статус прокси, процесса, порта 1443 и ссылки для подключения
+    Status,
+    /// Запустить TG WS Proxy в фоновом режиме (с иконкой в трее)
+    Start,
+    /// Остановить процессы TG WS Proxy
+    Stop,
+    /// Перезапустить TG WS Proxy
+    Restart,
+    /// Открыть окно добавления прокси прямо в Telegram Desktop (tg://proxy)
+    Connect,
+    /// Скопировать готовую ссылку tg://proxy в буфер обмена Windows
+    CopyLink,
+    /// Просмотреть последние строки журнала proxy.log
+    Logs,
+    /// Открыть папку с программой или логами в Проводнике
+    Open,
+    /// Загрузить или обновить TgWsProxy_windows.exe с GitHub Flowseal
+    Update {
+        /// Принудительно обновить
+        #[arg(short, long)]
+        force: bool,
+        /// Путь к папке или файлу для сохранения
+        #[arg(short, long)]
+        path: Option<String>,
+    },
+    /// Установить TG WS Proxy с GitHub
+    Install {
+        /// Путь для установки (по умолчанию C:\tg-ws-proxy)
+        #[arg(short, long)]
+        path: Option<String>,
+    },
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -297,6 +339,104 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         Ok(msg) => println!("{}", msg),
                         Err(e) => {
                             eprintln!("{}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+            }
+            return Ok(());
+        }
+        Some(Commands::TgProxy { action }) => {
+            let tg_cfg = config.tg_proxy.clone().unwrap_or_default();
+            match action {
+                TgProxyCommands::Status => {
+                    println!("{}", TgProxyManager::get_status(&tg_cfg));
+                }
+                TgProxyCommands::Start => {
+                    match TgProxyManager::start(&tg_cfg) {
+                        Ok(msg) => println!("{}", msg),
+                        Err(e) => {
+                            eprintln!("Ошибка запуска: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                TgProxyCommands::Stop => {
+                    match TgProxyManager::stop(&tg_cfg) {
+                        Ok(msg) => println!("{}", msg),
+                        Err(e) => {
+                            eprintln!("Ошибка остановки: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                TgProxyCommands::Restart => {
+                    match TgProxyManager::restart(&tg_cfg) {
+                        Ok(msg) => println!("{}", msg),
+                        Err(e) => {
+                            eprintln!("Ошибка перезапуска: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                TgProxyCommands::Connect => {
+                    match TgProxyManager::connect_telegram(&tg_cfg) {
+                        Ok(msg) => println!("{}", msg),
+                        Err(e) => {
+                            eprintln!("Ошибка подключения: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                TgProxyCommands::CopyLink => {
+                    match TgProxyManager::copy_link(&tg_cfg) {
+                        Ok(msg) => println!("{}", msg),
+                        Err(e) => {
+                            eprintln!("Ошибка копирования ссылки: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                TgProxyCommands::Logs => {
+                    match TgProxyManager::open_logs(&tg_cfg) {
+                        Ok(msg) => println!("{}", msg),
+                        Err(e) => {
+                            eprintln!("Ошибка чтения логов: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                TgProxyCommands::Open => {
+                    match TgProxyManager::open_folder(&tg_cfg) {
+                        Ok(msg) => println!("{}", msg),
+                        Err(e) => {
+                            eprintln!("Ошибка открытия папки: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                TgProxyCommands::Update { force, path } => {
+                    let target = path.as_deref().map(std::path::Path::new);
+                    match TgProxyManager::update(&tg_cfg, target, force) {
+                        Ok(msg) => println!("{}", msg),
+                        Err(e) => {
+                            eprintln!("Ошибка обновления: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                TgProxyCommands::Install { path } => {
+                    let target_str = path.unwrap_or_else(|| "C:\\tg-ws-proxy".to_string());
+                    let target_path = std::path::PathBuf::from(&target_str);
+                    let mut updated_config = config.clone();
+                    updated_config.set_tg_proxy_path(target_path.join("TgWsProxy_windows.exe").display().to_string());
+                    let _ = updated_config.save(&config_path);
+
+                    let effective_cfg = updated_config.tg_proxy.unwrap_or_default();
+                    match TgProxyManager::update(&effective_cfg, Some(&target_path), true) {
+                        Ok(msg) => println!("{}", msg),
+                        Err(e) => {
+                            eprintln!("Ошибка установки: {}", e);
                             std::process::exit(1);
                         }
                     }

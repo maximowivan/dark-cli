@@ -1,0 +1,575 @@
+use crate::config::TgProxyConfig;
+use std::fs;
+use std::net::{SocketAddr, TcpStream};
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::thread::sleep;
+use std::time::Duration;
+
+#[derive(Debug, Clone)]
+pub struct TgProxySummary {
+    pub is_installed: bool,
+    pub exe_path: Option<PathBuf>,
+    pub is_running: bool,
+    pub pids: Vec<u32>,
+    pub is_port_listening: bool,
+    pub port: u16,
+    pub host: String,
+    pub secret: Option<String>,
+    pub config_file: Option<PathBuf>,
+    pub log_file: Option<PathBuf>,
+    pub tg_link: String,
+    pub web_link: String,
+}
+
+pub struct TgProxyManager;
+
+impl TgProxyManager {
+    /// Получить сводку состояния TG WS Proxy
+    pub fn get_summary(config: &TgProxyConfig) -> TgProxySummary {
+        let exe_path = config.get_resolved_path();
+        let is_installed = exe_path.is_some();
+        let pids = Self::get_running_pids();
+        let is_running = !pids.is_empty();
+
+        let (host, port, secret) = Self::read_config_json(config.default_port);
+        let is_port_listening = Self::check_port_listening(&host, port);
+
+        let config_file = TgProxyConfig::get_config_json_path().filter(|p| p.exists());
+        let log_file = TgProxyConfig::get_log_file_path().filter(|p| p.exists());
+
+        let secret_str = secret.as_deref().unwrap_or("");
+        let tg_link = if secret_str.is_empty() {
+            format!("tg://proxy?server={}&port={}", host, port)
+        } else {
+            format!("tg://proxy?server={}&port={}&secret={}", host, port, secret_str)
+        };
+
+        let web_link = if secret_str.is_empty() {
+            format!("https://t.me/proxy?server={}&port={}", host, port)
+        } else {
+            format!("https://t.me/proxy?server={}&port={}&secret={}", host, port, secret_str)
+        };
+
+        TgProxySummary {
+            is_installed,
+            exe_path,
+            is_running,
+            pids,
+            is_port_listening,
+            port,
+            host,
+            secret,
+            config_file,
+            log_file,
+            tg_link,
+            web_link,
+        }
+    }
+
+    /// Форматированный отчет о статусе работы
+    pub fn get_status(config: &TgProxyConfig) -> String {
+        let summary = Self::get_summary(config);
+        let mut out = String::new();
+
+        out.push_str("====================================================\n");
+        out.push_str("     СТАТУС FLOWSEAL TG WS PROXY (TELEGRAM)         \n");
+        out.push_str("====================================================\n\n");
+
+        // 1. Установка
+        if summary.is_installed {
+            out.push_str("📌 Статус установки:  🟢 Установлен на этом компьютере\n");
+            if let Some(ref path) = summary.exe_path {
+                out.push_str(&format!("📁 Файл программы:    {}\n", path.display()));
+            }
+        } else {
+            out.push_str("📌 Статус установки:  🔴 НЕ УСТАНОВЛЕН НА ЭТОМ ПК\n");
+            out.push_str("📁 Файл программы:    [Не найден TgWsProxy_windows.exe]\n");
+        }
+
+        // 2. Процесс
+        if summary.is_running {
+            let pids_str: Vec<String> = summary.pids.iter().map(|p| p.to_string()).collect();
+            out.push_str(&format!("⚡ Статус процесса:   🟢 Работает (PID: {})\n", pids_str.join(", ")));
+        } else {
+            out.push_str("⚡ Статус процесса:   🔴 Остановлен\n");
+        }
+
+        // 3. Порт
+        if summary.is_port_listening {
+            out.push_str(&format!("🌐 Локальный порт:    🟢 {}:{} (Слушает подключения)\n", summary.host, summary.port));
+        } else {
+            out.push_str(&format!("🌐 Локальный порт:    🔴 {}:{} (Не доступен)\n", summary.host, summary.port));
+        }
+
+        // 4. Secret
+        if let Some(ref sec) = summary.secret {
+            out.push_str(&format!("🔑 Secret (ключ):     {}\n", sec));
+        } else {
+            out.push_str("🔑 Secret (ключ):     [Не задан или конфиг отсутствует]\n");
+        }
+
+        // 5. Конфиг и логи
+        if let Some(ref cf) = summary.config_file {
+            out.push_str(&format!("⚙  Файл настроек:     {}\n", cf.display()));
+        }
+        if let Some(ref lf) = summary.log_file {
+            let size = fs::metadata(lf).map(|m| m.len()).unwrap_or(0);
+            let size_kb = (size as f64) / 1024.0;
+            out.push_str(&format!("📝 Файл логов:        {} ({:.1} KB)\n", lf.display(), size_kb));
+        }
+
+        out.push('\n');
+
+        // 6. Ссылки для подключения
+        if summary.is_running && summary.is_port_listening {
+            out.push_str("🚀 БЫСТРОЕ ПОДКЛЮЧЕНИЕ TELEGRAM DESKTOP:\n");
+            out.push_str(&format!("   ▶ Ссылка для приложения: {}\n", summary.tg_link));
+            out.push_str(&format!("   ▶ Веб-ссылка (t.me):      {}\n\n", summary.web_link));
+            out.push_str("💡 Нажмите [c] («Подключить в Telegram») для мгновенного добавления в Telegram Desktop,\n");
+            out.push_str("   или [y] («Скопировать ссылку прокси») для копирования ссылки в буфер обмена.\n");
+        } else if summary.is_installed {
+            out.push_str("💡 Прокси установлен, но не запущен. Нажмите [1] («Запустить TG WS Proxy»).\n");
+        } else {
+            out.push_str("💡 Чтобы установить TG WS Proxy с GitHub в один клик, нажмите [u] («Установить / Обновить»).\n");
+        }
+
+        // 7. Проверка релизов GitHub
+        out.push_str("\n🔍 Проверка последней версии на GitHub...\n");
+        match Self::get_latest_github_release(&config.github_repo) {
+            Ok((tag, url)) => {
+                out.push_str(&format!("🌐 Последний релиз:   {}\n", tag));
+                out.push_str(&format!("🔗 Ссылка:            {}\n", url));
+            }
+            Err(e) => {
+                out.push_str(&format!("⚠️  Не удалось проверить GitHub: {}\n", e));
+            }
+        }
+
+        out.push_str("\n====================================================\n");
+        out
+    }
+
+    /// Запустить TG WS Proxy
+    pub fn start(config: &TgProxyConfig) -> Result<String, String> {
+        let summary = Self::get_summary(config);
+        if summary.is_running && summary.is_port_listening {
+            return Ok(format!(
+                "🟢 TG WS Proxy уже работает (PID: {}) на порту {}:{}.\nСсылка: {}",
+                summary.pids.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(", "),
+                summary.host,
+                summary.port,
+                summary.tg_link
+            ));
+        }
+
+        let exe = match summary.exe_path {
+            Some(p) => p,
+            None => {
+                return Err(
+                    "Исполняемый файл TgWsProxy_windows.exe не найден!\n\
+                     Запустите 'dark-cli tg-proxy update' или нажмите [u] для автоматической загрузки с GitHub."
+                        .to_string(),
+                );
+            }
+        };
+
+        // Запуск процесса в фоновом режиме (системный трей)
+        #[cfg(target_os = "windows")]
+        {
+            let parent_dir = exe.parent().unwrap_or_else(|| Path::new("."));
+            Command::new(&exe)
+                .current_dir(parent_dir)
+                .spawn()
+                .map_err(|e| format!("Не удалось запустить {}: {}", exe.display(), e))?;
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            Command::new(&exe)
+                .spawn()
+                .map_err(|e| format!("Не удалось запустить {}: {}", exe.display(), e))?;
+        }
+
+        // Ждем поднятия прокси до 3 секунд
+        for _ in 0..6 {
+            sleep(Duration::from_millis(500));
+            let new_summary = Self::get_summary(config);
+            if new_summary.is_running && new_summary.is_port_listening {
+                return Ok(format!(
+                    "✅ TG WS Proxy успешно запущен!\n\
+                     ⚡ Процесс: PID {}\n\
+                     🌐 Порт: {}:{}\n\
+                     🔗 Ссылка: {}\n\n\
+                     Значок программы появился в системном трее Windows рядом с часами.",
+                    new_summary.pids.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(", "),
+                    new_summary.host,
+                    new_summary.port,
+                    new_summary.tg_link
+                ));
+            }
+        }
+
+        Ok("TG WS Proxy запущен (ожидает инициализации сокетов). Проверьте статус через клавишу [s].".to_string())
+    }
+
+    /// Остановить все процессы TG WS Proxy
+    pub fn stop(_config: &TgProxyConfig) -> Result<String, String> {
+        let pids = Self::get_running_pids();
+        if pids.is_empty() {
+            return Ok("TG WS Proxy не запущен.".to_string());
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            let _ = Command::new("taskkill")
+                .args(["/F", "/IM", "TgWsProxy_windows.exe"])
+                .output();
+            let _ = Command::new("taskkill")
+                .args(["/F", "/IM", "TgWsProxy*.exe"])
+                .output();
+        }
+
+        sleep(Duration::from_millis(500));
+        let remaining = Self::get_running_pids();
+        if remaining.is_empty() {
+            Ok(format!("✅ TG WS Proxy успешно остановлен (завершены процессы: {:?}).", pids))
+        } else {
+            Err(format!("Не удалось завершить некоторые процессы: {:?}", remaining))
+        }
+    }
+
+    /// Перезапустить TG WS Proxy
+    pub fn restart(config: &TgProxyConfig) -> Result<String, String> {
+        let stop_msg = Self::stop(config).unwrap_or_else(|e| format!("Предупреждение: {}", e));
+        sleep(Duration::from_millis(1000));
+        let start_msg = Self::start(config)?;
+        Ok(format!("{}\n\n{}", stop_msg, start_msg))
+    }
+
+    /// Подключить в Telegram Desktop (открыть tg://proxy)
+    pub fn connect_telegram(config: &TgProxyConfig) -> Result<String, String> {
+        let summary = Self::get_summary(config);
+        if !summary.is_running || !summary.is_port_listening {
+            let _ = Self::start(config);
+            sleep(Duration::from_millis(1000));
+        }
+
+        let link = Self::get_summary(config).tg_link;
+
+        #[cfg(target_os = "windows")]
+        {
+            Command::new("cmd")
+                .args(["/c", "start", "", &link])
+                .spawn()
+                .map_err(|e| format!("Не удалось открыть ссылку в Telegram Desktop: {}", e))?;
+        }
+
+        Ok(format!(
+            "✅ Ссылка отправлена в Telegram Desktop!\n\
+             В открывшемся окне Telegram нажмите «Включить прокси» (Enable Proxy).\n\n\
+             Параметры подключения:\n\
+             ▶ Сервер: {}\n\
+             ▶ Порт:   {}\n\
+             ▶ Secret: {}\n\
+             ▶ Ссылка: {}",
+            summary.host,
+            summary.port,
+            summary.secret.as_deref().unwrap_or("[авто]"),
+            link
+        ))
+    }
+
+    /// Скопировать готовую ссылку tg://proxy в буфер обмена Windows
+    pub fn copy_link(config: &TgProxyConfig) -> Result<String, String> {
+        let summary = Self::get_summary(config);
+        let link = &summary.tg_link;
+
+        let script = format!("Set-Clipboard -Value '{}'", link);
+        Self::run_powershell(&script)?;
+
+        Ok(format!(
+            "✅ Ссылка на MTProto прокси скопирована в буфер обмена!\n\n\
+             {}\n\n\
+             Вы можете вставить её в чат «Избранное» (Saved Messages) в Telegram или передать друзьям.",
+            link
+        ))
+    }
+
+    /// Показать последние строки лога proxy.log
+    pub fn open_logs(_config: &TgProxyConfig) -> Result<String, String> {
+        let log_path = match TgProxyConfig::get_log_file_path() {
+            Some(p) if p.exists() => p,
+            _ => {
+                return Err("Файл логов proxy.log пока не создан. Запустите прокси хотя бы один раз.".to_string());
+            }
+        };
+
+        let content = fs::read_to_string(&log_path)
+            .map_err(|e| format!("Не удалось прочитать {}: {}", log_path.display(), e))?;
+
+        let lines: Vec<&str> = content.lines().collect();
+        let total = lines.len();
+        let to_show = if total > 60 { &lines[total - 60..] } else { &lines[..] };
+
+        let mut out = String::new();
+        out.push_str("====================================================\n");
+        out.push_str(&format!("  ЖУРНАЛ TG WS PROXY (Последние {} строк)\n", to_show.len()));
+        out.push_str(&format!("  Путь: {}\n", log_path.display()));
+        out.push_str("====================================================\n\n");
+        out.push_str(&to_show.join("\n"));
+        out.push_str("\n\n====================================================\n");
+        out.push_str("💡 Чтобы открыть полный файл в Блокноте, введите: notepad \"%APPDATA%\\TgWsProxy\\proxy.log\"\n");
+
+        Ok(out)
+    }
+
+    /// Открыть папку с файлом программы или логами в Проводнике
+    pub fn open_folder(config: &TgProxyConfig) -> Result<String, String> {
+        let folder = config
+            .get_resolved_path()
+            .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+            .or_else(TgProxyConfig::get_appdata_dir);
+
+        let target = match folder {
+            Some(f) if f.exists() => f,
+            _ => PathBuf::from("C:\\"),
+        };
+
+        Command::new("explorer")
+            .arg(&target)
+            .spawn()
+            .map_err(|e| format!("Не удалось открыть папку {}: {}", target.display(), e))?;
+
+        Ok(format!("Папка открыта в Проводнике: {}", target.display()))
+    }
+
+    /// Загрузить / Обновить TgWsProxy_windows.exe с GitHub
+    pub fn update(config: &TgProxyConfig, path: Option<&Path>, _force: bool) -> Result<String, String> {
+        let (latest_tag, download_url) = Self::get_latest_github_release_asset(&config.github_repo)?;
+
+        // Определяем куда сохранять
+        let target_exe = match path {
+            Some(p) => {
+                if p.is_dir() {
+                    p.join("TgWsProxy_windows.exe")
+                } else {
+                    p.to_path_buf()
+                }
+            }
+            None => {
+                if let Some(existing) = config.get_resolved_path() {
+                    existing
+                } else {
+                    PathBuf::from("C:\\tg-ws-proxy\\TgWsProxy_windows.exe")
+                }
+            }
+        };
+
+        // Останавливаем старый процесс, если запущен
+        let _ = Self::stop(config);
+        sleep(Duration::from_millis(500));
+
+        if let Some(parent) = target_exe.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+
+        println!("Загрузка {}...", download_url);
+        let download_script = format!(
+            "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; \
+             $url = '{}'; \
+             $out = '{}'; \
+             Invoke-WebRequest -Uri $url -OutFile $out -UseBasicParsing",
+            download_url,
+            target_exe.display()
+        );
+
+        Self::run_powershell(&download_script)
+            .map_err(|e| format!("Ошибка скачивания файла: {}", e))?;
+
+        if !target_exe.exists() {
+            return Err("Файл не был создан после скачивания.".to_string());
+        }
+
+        // Автоматически запускаем обновленный прокси
+        sleep(Duration::from_millis(500));
+        let mut new_config = config.clone();
+        new_config.path = Some(target_exe.display().to_string());
+        let _ = Self::start(&new_config);
+
+        Ok(format!(
+            "🎉 TG WS Proxy успешно обновлен до версии {}!\n\
+             📁 Расположение: {}\n\
+             Прокси запущен и готов к работе в фоновом режиме.",
+            latest_tag,
+            target_exe.display()
+        ))
+    }
+
+    // --- Внутренние вспомогательные методы ---
+
+    fn get_running_pids() -> Vec<u32> {
+        #[cfg(target_os = "windows")]
+        {
+            let script = "Get-Process -Name *tgws*, *TgWsProxy* -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id";
+            if let Ok(output) = Self::run_powershell(script) {
+                return output
+                    .lines()
+                    .filter_map(|l| l.trim().parse::<u32>().ok())
+                    .collect();
+            }
+        }
+        Vec::new()
+    }
+
+    fn check_port_listening(host: &str, port: u16) -> bool {
+        let addr_str = if host == "0.0.0.0" || host.is_empty() { "127.0.0.1" } else { host };
+        if let Ok(addr) = format!("{}:{}", addr_str, port).parse::<SocketAddr>() {
+            TcpStream::connect_timeout(&addr, Duration::from_millis(250)).is_ok()
+        } else {
+            false
+        }
+    }
+
+    fn read_config_json(default_port: u16) -> (String, u16, Option<String>) {
+        let path = match TgProxyConfig::get_config_json_path() {
+            Some(p) if p.exists() => p,
+            _ => return ("127.0.0.1".to_string(), default_port, None),
+        };
+
+        if let Ok(content) = fs::read_to_string(&path) {
+            let host = Self::extract_json_string(&content, "host").unwrap_or_else(|| "127.0.0.1".to_string());
+            let port = Self::extract_json_u16(&content, "port").unwrap_or(default_port);
+            let secret = Self::extract_json_string(&content, "secret");
+            (host, port, secret)
+        } else {
+            ("127.0.0.1".to_string(), default_port, None)
+        }
+    }
+
+    pub fn extract_json_string(json: &str, key: &str) -> Option<String> {
+        let pattern = format!("\"{}\":", key);
+        let idx = json.find(&pattern)?;
+        let rest = &json[idx + pattern.len()..];
+        let trimmed = rest.trim_start();
+        if trimmed.starts_with('"') {
+            let inner = &trimmed[1..];
+            let end_quote = inner.find('"')?;
+            Some(inner[..end_quote].to_string())
+        } else {
+            None
+        }
+    }
+
+    pub fn extract_json_u16(json: &str, key: &str) -> Option<u16> {
+        let pattern = format!("\"{}\":", key);
+        let idx = json.find(&pattern)?;
+        let rest = &json[idx + pattern.len()..];
+        let trimmed = rest.trim_start();
+        let num_str: String = trimmed.chars().take_while(|c| c.is_ascii_digit()).collect();
+        num_str.parse::<u16>().ok()
+    }
+
+    fn get_latest_github_release(repo: &str) -> Result<(String, String), String> {
+        let script = format!(
+            "$r = Invoke-RestMethod -Uri 'https://api.github.com/repos/{}/releases/latest' -Headers @{{'User-Agent'='DarkCLI'}}; \
+             Write-Output \"$($r.tag_name)|$($r.html_url)\"",
+            repo
+        );
+
+        let output = Self::run_powershell(&script)?;
+        let trimmed = output.trim();
+        let parts: Vec<&str> = trimmed.split('|').collect();
+        if parts.len() == 2 {
+            Ok((parts[0].to_string(), parts[1].to_string()))
+        } else {
+            Err(format!("Неожиданный ответ GitHub: {}", trimmed))
+        }
+    }
+
+    fn get_latest_github_release_asset(repo: &str) -> Result<(String, String), String> {
+        let script = format!(
+            "$r = Invoke-RestMethod -Uri 'https://api.github.com/repos/{}/releases/latest' -Headers @{{'User-Agent'='DarkCLI'}}; \
+             $asset = $r.assets | Where-Object {{ $_.name -like '*windows.exe' }} | Select-Object -First 1; \
+             Write-Output \"$($r.tag_name)|$($asset.browser_download_url)\"",
+            repo
+        );
+
+        let output = Self::run_powershell(&script)?;
+        let trimmed = output.trim();
+        let parts: Vec<&str> = trimmed.split('|').collect();
+        if parts.len() == 2 && !parts[1].is_empty() {
+            Ok((parts[0].to_string(), parts[1].to_string()))
+        } else {
+            Err(format!("Не удалось найти windows.exe в релизах: {}", trimmed))
+        }
+    }
+
+    fn run_powershell(script: &str) -> Result<String, String> {
+        let full_script = format!(
+            "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; \
+             $OutputEncoding = [System.Text.Encoding]::UTF8; \
+             {}",
+            script
+        );
+
+        let output = Command::new("powershell")
+            .args(["-NoProfile", "-Command", &full_script])
+            .output()
+            .map_err(|e| format!("Не удалось запустить PowerShell: {}", e))?;
+
+        let stdout = decode_bytes(&output.stdout);
+        let stderr = decode_bytes(&output.stderr);
+
+        if !output.status.success() && stdout.trim().is_empty() {
+            Err(stderr)
+        } else {
+            Ok(format!("{}{}", stdout, if stderr.is_empty() { "" } else { "\n" }).trim().to_string())
+        }
+    }
+}
+
+fn decode_bytes(bytes: &[u8]) -> String {
+    if let Ok(s) = std::str::from_utf8(bytes) {
+        return s.to_string();
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use oem_cp::{Cp866, StringExt};
+        String::from_cp::<Cp866>(bytes)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        String::from_utf8_lossy(bytes).to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_json_values() {
+        let json = r#"{
+            "host": "127.0.0.1",
+            "port": 1443,
+            "secret": "7b3259e60e85cc5f02332e61b8c21bf3",
+            "verbose": false
+        }"#;
+
+        assert_eq!(TgProxyManager::extract_json_string(json, "host"), Some("127.0.0.1".to_string()));
+        assert_eq!(TgProxyManager::extract_json_u16(json, "port"), Some(1443));
+        assert_eq!(
+            TgProxyManager::extract_json_string(json, "secret"),
+            Some("7b3259e60e85cc5f02332e61b8c21bf3".to_string())
+        );
+    }
+
+    #[test]
+    fn test_link_generation() {
+        let config = TgProxyConfig::default();
+        let summary = TgProxyManager::get_summary(&config);
+        assert!(summary.tg_link.starts_with("tg://proxy?server="));
+        assert!(summary.web_link.starts_with("https://t.me/proxy?server="));
+    }
+}
