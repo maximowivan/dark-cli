@@ -26,27 +26,43 @@ shortcut = "s"
 
 [[actions]]
 id = "zapret-start"
-name = "Запустить Zapret"
-description = "Запуск службы обхода блокировок (net start zapret)"
+name = "Запустить службу Zapret"
+description = "Запуск системной службы обхода блокировок (net start zapret, без окон консоли)"
 category = "Zapret"
 command = "dark-cli zapret start"
 shortcut = "1"
 
 [[actions]]
 id = "zapret-stop"
-name = "Остановить Zapret"
-description = "Остановка службы и принудительное завершение процессов winws"
+name = "Остановить службу Zapret"
+description = "Остановка системной службы zapret и процессов winws.exe"
 category = "Zapret"
 command = "dark-cli zapret stop"
 shortcut = "0"
 
 [[actions]]
 id = "zapret-restart"
-name = "Перезапустить Zapret"
+name = "Перезапустить службу Zapret"
 description = "Быстрый перезапуск службы обходчика (stop -> wait -> start)"
 category = "Zapret"
 command = "dark-cli zapret restart"
 shortcut = "r"
+
+[[actions]]
+id = "zapret-service-install"
+name = "Установить / Сменить стратегию службы"
+description = "Регистрация службы Windows с выбором стратегии (по умолчанию general ALT11)"
+category = "Zapret"
+command = "dark-cli zapret service-install"
+shortcut = "e"
+
+[[actions]]
+id = "zapret-service-remove"
+name = "Удалить службу Windows"
+description = "Полное удаление системной службы zapret из Windows (sc delete zapret)"
+category = "Zapret"
+command = "dark-cli zapret service-remove"
+shortcut = "x"
 
 [[actions]]
 id = "zapret-update"

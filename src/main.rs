@@ -71,6 +71,14 @@ enum ZapretCommands {
     },
     /// Открыть папку с программой Zapret в Проводнике
     Open,
+    /// Установить службу Windows zapret со стратегией (по умолчанию ALT11)
+    ServiceInstall {
+        /// Название стратегии (например "general (ALT11)")
+        #[arg(short, long)]
+        strategy: Option<String>,
+    },
+    /// Удалить службу Windows zapret из системы
+    ServiceRemove,
     /// Запустить оригинальный service.bat от имени администратора
     Manager,
 }
@@ -212,6 +220,63 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         Ok(msg) => println!("{}", msg),
                         Err(e) => {
                             eprintln!("{}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                ZapretCommands::ServiceInstall { strategy } => {
+                    let strat_to_use = match strategy {
+                        Some(s) => Some(s),
+                        None => {
+                            if let Some(path) = zapret_cfg.get_resolved_path() {
+                                let list = ZapretManager::list_available_strategies(&path);
+                                if !list.is_empty() {
+                                    println!("\n====================================================");
+                                    println!("       ВЫБОР СТРАТЕГИИ ДЛЯ СЛУЖБЫ ZAPRET            ");
+                                    println!("====================================================");
+                                    println!("Доступные стратегии в папке:");
+                                    for (i, st) in list.iter().enumerate() {
+                                        println!("  [{}] {}", i + 1, st);
+                                    }
+                                    println!("\nНажмите Enter для использования 'general (ALT11)' по умолчанию");
+                                    print!("или введите номер стратегии: ");
+                                    let _ = std::io::Write::flush(&mut std::io::stdout());
+                                    let mut input = String::new();
+                                    let _ = std::io::stdin().read_line(&mut input);
+                                    let trimmed = input.trim();
+                                    if trimmed.is_empty() {
+                                        Some("general (ALT11)".to_string())
+                                    } else if let Ok(num) = trimmed.parse::<usize>() {
+                                        if num >= 1 && num <= list.len() {
+                                            Some(list[num - 1].clone())
+                                        } else {
+                                            Some(trimmed.to_string())
+                                        }
+                                    } else {
+                                        Some(trimmed.to_string())
+                                    }
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
+                            }
+                        }
+                    };
+
+                    match ZapretManager::install_service(&zapret_cfg, strat_to_use.as_deref()) {
+                        Ok(msg) => println!("{}", msg),
+                        Err(e) => {
+                            eprintln!("Ошибка установки службы: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                ZapretCommands::ServiceRemove => {
+                    match ZapretManager::remove_service(&zapret_cfg) {
+                        Ok(msg) => println!("{}", msg),
+                        Err(e) => {
+                            eprintln!("Ошибка удаления службы: {}", e);
                             std::process::exit(1);
                         }
                     }

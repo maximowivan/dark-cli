@@ -62,8 +62,9 @@ impl ZapretManager {
             out.push_str("     [1] Установить в папку по умолчанию (C:\\zapret)\n");
             out.push_str("     [2] Выбрать свою папку\n");
         } else if service_status.contains("Не установлена") {
-            out.push_str("\n💡 Служба Windows не зарегистрирована. Zapret можно запускать напрямую (клавиша '1')\n");
-            out.push_str("   или зарегистрировать как постоянную службу через Service.bat (клавиша 'm').\n");
+            out.push_str("\n💡 Служба Windows еще не установлена. Нажмите [1] («Запустить службу Zapret»),\n");
+            out.push_str("   и программа автоматически зарегистрирует и запустит службу Windows в скрытом режиме (без окон)!\n");
+            out.push_str("   Сменить стратегию службы можно клавишей [e] («Установить / Сменить стратегию службы»).\n");
         }
 
         // 5. Проверка последнего релиза на GitHub
@@ -153,27 +154,239 @@ impl ZapretManager {
         None
     }
 
-    /// Запустить Zapret (службу Windows или автономный процесс winws.exe)
-    pub fn start(config: &ZapretConfig) -> Result<String, String> {
+    /// Получить список всех доступных стратегий (.bat файлов) в папке Zapret
+    pub fn list_available_strategies(zapret_dir: &Path) -> Vec<String> {
+        let mut strategies = Vec::new();
+        if let Ok(entries) = fs::read_dir(zapret_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() {
+                    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                        let name_lower = name.to_lowercase();
+                        if name_lower.ends_with(".bat") && !name_lower.starts_with("service") {
+                            let stem = path
+                                .file_stem()
+                                .and_then(|s| s.to_str())
+                                .unwrap_or(name);
+                            strategies.push(stem.to_string());
+                        }
+                    }
+                }
+            }
+        }
+        strategies.sort();
+        strategies
+    }
+
+    /// Разобрать .bat файл стратегии и извлечь командную строку для службы winws.exe
+    pub fn parse_strategy_bat(
+        bat_path: &Path,
+        zapret_dir: &Path,
+    ) -> Result<(String, String), String> {
+        let content = fs::read_to_string(bat_path)
+            .map_err(|e| format!("Не удалось прочитать файл стратегии {}: {}", bat_path.display(), e))?;
+
+        let strategy_name = bat_path
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "general".to_string());
+
+        let dir_str = zapret_dir.display().to_string().trim_end_matches('\\').to_string();
+        let bin_dir = format!("{}\\", zapret_dir.join("bin").display());
+        let lists_dir = format!("{}\\", zapret_dir.join("lists").display());
+
+        let mut in_command = false;
+        let mut command_parts = Vec::new();
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with("::") || trimmed.starts_with("rem ") {
+                continue;
+            }
+
+            if !in_command {
+                if trimmed.contains("winws.exe") {
+                    in_command = true;
+                    // Извлекаем все после winws.exe" или winws.exe
+                    let after_winws = if let Some(idx) = trimmed.find("winws.exe\"") {
+                        &trimmed[idx + 10..]
+                    } else if let Some(idx) = trimmed.find("winws.exe") {
+                        &trimmed[idx + 9..]
+                    } else {
+                        trimmed
+                    };
+                    let cleaned = after_winws.trim_end_matches('^').trim();
+                    command_parts.push(cleaned.to_string());
+                    if !trimmed.ends_with('^') {
+                        break;
+                    }
+                }
+            } else {
+                let cleaned = trimmed.trim_end_matches('^').trim();
+                command_parts.push(cleaned.to_string());
+                if !trimmed.ends_with('^') {
+                    break;
+                }
+            }
+        }
+
+        if command_parts.is_empty() {
+            return Err(format!(
+                "В файле '{}' не найдена команда запуска winws.exe",
+                bat_path.display()
+            ));
+        }
+
+        let raw_args = command_parts.join(" ");
+
+        // Выполняем подстановку путей и переменных окружения
+        let replaced_args = raw_args
+            .replace("%BIN%", &bin_dir)
+            .replace("%bin%", &bin_dir)
+            .replace("%LISTS%", &lists_dir)
+            .replace("%lists%", &lists_dir)
+            .replace("%GameFilterTCP%", "12")
+            .replace("%GameFilterUDP%", "12")
+            .replace("%GameFilter%", "12")
+            .replace("%~dp0", &format!("{}\\", dir_str));
+
+        let winws_exe = zapret_dir.join("bin").join("winws.exe");
+        let full_command_line = format!("\"{}\" {}", winws_exe.display(), replaced_args.trim());
+
+        Ok((strategy_name, full_command_line))
+    }
+
+    /// Установить службу Windows zapret со стратегией (по умолчанию ALT11)
+    pub fn install_service(
+        config: &ZapretConfig,
+        strategy_name: Option<&str>,
+    ) -> Result<String, String> {
         let resolved_path = config.get_resolved_path().ok_or_else(|| {
+            "Папка Zapret не найдена на этом ПК! Нажмите [u] ('Обновить / Установить Zapret') или [i] для установки.".to_string()
+        })?;
+
+        // Ищем файл стратегии
+        let bat_path = if let Some(name) = strategy_name {
+            let mut p = resolved_path.join(name);
+            if !p.exists() && !name.ends_with(".bat") {
+                p = resolved_path.join(format!("{}.bat", name));
+            }
+            if !p.exists() {
+                return Err(format!(
+                    "Файл стратегии '{}' не найден в папке {}",
+                    name,
+                    resolved_path.display()
+                ));
+            }
+            p
+        } else {
+            Self::find_strategy_bat(&resolved_path).ok_or_else(|| {
+                format!(
+                    "В папке '{}' не найдены файлы стратегий (general*.bat)",
+                    resolved_path.display()
+                )
+            })?
+        };
+
+        let (strat_name, full_command_line) = Self::parse_strategy_bat(&bat_path, &resolved_path)?;
+        let service = &config.service_name;
+
+        let script = format!(
+            r#"$cmd = @'
+{cmd}
+'@;
+$strat = '{strat}';
+$srv = '{service}';
+
+# 1. Остановка старой службы и удаление
+$existing = Get-Service -Name $srv -ErrorAction SilentlyContinue;
+if ($existing) {{
+    Stop-Service -Name $srv -Force -ErrorAction SilentlyContinue;
+    sc.exe delete $srv | Out-Null;
+    Start-Sleep -Milliseconds 500;
+}}
+
+# 2. Создание новой службы
+sc.exe create $srv binPath= "placeholder" DisplayName= "$srv" start= auto | Out-Null;
+sc.exe description $srv "Zapret DPI bypass software" | Out-Null;
+Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\$srv" -Name "ImagePath" -Value $cmd -Type ExpandString;
+New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\$srv" -Name "zapret-discord-youtube" -Value $strat -PropertyType String -Force | Out-Null;
+netsh interface tcp set global timestamps=enabled | Out-Null;
+
+$installed = Get-Service -Name $srv -ErrorAction SilentlyContinue;
+if ($installed) {{
+    Write-Output "SUCCESS|$strat"
+}} else {{
+    Write-Output "FAIL"
+}}"#,
+            cmd = full_command_line,
+            strat = strat_name,
+            service = service,
+        );
+
+        // Для записи в реестр HKLM и создания службы требуются права администратора (RunAs)
+        let temp_script = std::env::temp_dir().join(format!("install_zapret_{}.ps1", std::process::id()));
+        fs::write(&temp_script, script.as_bytes())
+            .map_err(|e| format!("Не удалось создать временный скрипт установки: {}", e))?;
+
+        let run_cmd = format!(
+            "Start-Process powershell -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File \"{}\"' -Verb RunAs -Wait",
+            temp_script.display()
+        );
+        let _ = Self::run_powershell_script(&run_cmd);
+        let _ = fs::remove_file(&temp_script);
+
+        // Проверяем статус созданной службы
+        let check_script = format!(
+            "$s = Get-Service -Name '{}' -ErrorAction SilentlyContinue; if ($s) {{ 'OK' }} else {{ 'FAIL' }}",
+            service
+        );
+        let res = Self::run_powershell_script(&check_script)?;
+        if res.trim() == "OK" {
+            Ok(format!(
+                "🟢 Служба Windows '{}' успешно зарегистрирована в системе!\n\
+                 🎯 Установлена стратегия: {}\n\
+                 ⚙  Тип запуска: Автоматически (при старте Windows)\n\
+                 ✨ Служба будет работать скрыто в фоновом режиме без открытия окон консоли.",
+                service, strat_name
+            ))
+        } else {
+            Err(format!(
+                "Не удалось зарегистрировать службу Windows '{}'.\n\
+                 Возможно, запрос прав администратора (UAC) был отклонен.",
+                service
+            ))
+        }
+    }
+
+    /// Удалить службу Windows zapret
+    pub fn remove_service(config: &ZapretConfig) -> Result<String, String> {
+        let service = &config.service_name;
+        let script = format!(
+            "Start-Process cmd -ArgumentList '/c net stop {service} & sc delete {service} & taskkill /F /IM winws.exe & net stop WinDivert' -Verb RunAs -Wait; \
+             $s = Get-Service -Name '{service}' -ErrorAction SilentlyContinue; \
+             if ($s) {{ 'FAIL' }} else {{ 'DELETED' }}",
+            service = service
+        );
+
+        let out = Self::run_powershell_script(&script)?;
+        let trimmed = out.trim();
+        if trimmed == "DELETED" {
+            Ok(format!("🗑 Служба Windows '{}' успешно удалена из системы.", service))
+        } else {
+            Err(format!("Не удалось удалить службу Windows '{}'. Проверьте права администратора.", service))
+        }
+    }
+
+    /// Запустить службу Zapret (ИСКЛЮЧИТЕЛЬНО как системную службу Windows, без открытия окон)
+    pub fn start(config: &ZapretConfig) -> Result<String, String> {
+        let _resolved_path = config.get_resolved_path().ok_or_else(|| {
             "Папка Zapret не найдена на этом ПК! Нажмите [u] ('Обновить / Установить Zapret') или [i] для установки.".to_string()
         })?;
 
         let service = &config.service_name;
 
-        // 1. Проверяем, не запущен ли уже winws.exe
-        let check_script = "$proc = Get-Process winws -ErrorAction SilentlyContinue; if ($proc) { $proc.Id -join ', ' }";
-        if let Ok(pid_out) = Self::run_powershell_script(check_script) {
-            let pids = pid_out.trim();
-            if !pids.is_empty() {
-                return Ok(format!(
-                    "⚡ Zapret (winws.exe) уже запущен и работает в фоновом режиме (PID: {}).",
-                    pids
-                ));
-            }
-        }
-
-        // 2. Проверяем наличие установленной службы Windows
+        // 1. Проверяем наличие установленной службы Windows
         let check_service_script = format!(
             "$s = Get-Service -Name '{}' -ErrorAction SilentlyContinue; \
              if ($s) {{ $s.Status.ToString() }} else {{ 'NOT_INSTALLED' }}",
@@ -184,68 +397,60 @@ impl ZapretManager {
             .unwrap_or_else(|_| "NOT_INSTALLED".to_string());
         let service_state = service_state.trim();
 
+        // 2. Если служба уже запущена, проверяем процесс
         if service_state == "Running" {
-            return Ok(format!("Служба Windows '{}' уже запущена.", service));
-        } else if service_state == "Stopped" || service_state == "Paused" {
-            // Служба установлена, запускаем ее
-            let start_service_script = format!(
-                "Start-Process cmd -ArgumentList '/c net start {}' -Verb RunAs -Wait; \
-                 $s = Get-Service -Name '{}' -ErrorAction SilentlyContinue; \
-                 if ($s.Status -eq 'Running') {{ 'OK' }} else {{ 'FAIL' }}",
-                service, service
-            );
-            let res = Self::run_powershell_script(&start_service_script)?;
-            if res.trim() == "OK" {
-                return Ok(format!("🟢 Служба Windows '{}' успешно запущена!", service));
-            } else {
-                return Err(format!(
-                    "Не удалось запустить службу '{}'. Проверьте системный журнал или откройте Service.bat (клавиша 'm').",
-                    service
-                ));
-            }
+            let proc_status = Self::check_winws_process();
+            let strat = Self::get_active_strategy(service);
+            return Ok(format!(
+                "Служба Windows '{}' уже работает в фоновом режиме.\n🎯 Стратегия: {}\n{}",
+                service, strat, proc_status
+            ));
         }
 
-        // 3. Служба Windows НЕ установлена -> запускаем автономную стратегию (general*.bat)
-        let strategy_bat = Self::find_strategy_bat(&resolved_path).ok_or_else(|| {
-            format!(
-                "Служба Windows '{}' не установлена, и в папке '{}' не найден подходящий файл стратегии (general*.bat).\n\
-                 Откройте Service.bat (клавиша 'm') для настройки или обновите Zapret (клавиша 'u').",
-                service, resolved_path.display()
-            )
-        })?;
+        // 3. Если служба Windows еще не зарегистрирована, автоматически устанавливаем ее
+        let mut install_msg = String::new();
+        if service_state == "NOT_INSTALLED" {
+            let install_res = Self::install_service(config, None)?;
+            install_msg = format!("{}\n\n", install_res);
+        }
 
-        let bat_name = strategy_bat
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| "general.bat".to_string());
-
-        let start_bat_script = format!(
-            "Start-Process cmd.exe -ArgumentList '/c cd /d \"{}\" && \"{}\"' -Verb RunAs -WindowStyle Minimized; \
-             Start-Sleep -Seconds 2; \
-             $proc = Get-Process winws -ErrorAction SilentlyContinue; \
-             if ($proc) {{ $proc.Id -join ', ' }} else {{ 'FAIL' }}",
-            resolved_path.display(),
-            strategy_bat.display()
+        // 4. Запускаем службу через net start с правами администратора
+        let start_service_script = format!(
+            "Start-Process cmd -ArgumentList '/c net start {service}' -Verb RunAs -Wait; \
+             $s = Get-Service -Name '{service}' -ErrorAction SilentlyContinue; \
+             if ($s -and $s.Status -eq 'Running') {{ \
+                 $proc = Get-Process winws -ErrorAction SilentlyContinue; \
+                 if ($proc) {{ 'OK|' + ($proc.Id -join ', ') }} else {{ 'OK_NO_PID' }} \
+             }} else {{ \
+                 'FAIL' \
+             }}",
+            service = service
         );
 
-        let res = Self::run_powershell_script(&start_bat_script)?;
+        let res = Self::run_powershell_script(&start_service_script)?;
         let trimmed = res.trim();
 
-        if trimmed != "FAIL" && !trimmed.is_empty() {
+        if trimmed.starts_with("OK") {
+            let strat = Self::get_active_strategy(service);
+            let pid_info = if trimmed.starts_with("OK|") {
+                format!("⚡ Процесс winws: 🟢 Активен (PID: {})", trimmed.trim_start_matches("OK|"))
+            } else {
+                Self::check_winws_process()
+            };
+
             Ok(format!(
-                "🟢 Zapret успешно запущен в фоновом режиме!\n\
-                 🎯 Стратегия запуска: {}\n\
-                 ⚡ Процесс winws.exe активен (PID: {})\n\n\
-                 💡 Примечание: Windows-служба '{}' пока не зарегистрирована в автозагрузке.\n\
-                    Если хотите, чтобы Zapret запускался сам при включении ПК, откройте\n\
-                    'Service.bat (Менеджер)' (клавиша 'm') и выберите пункт '1. Install Service'.",
-                bat_name, trimmed, service
+                "{}🟢 Служба Windows '{}' успешно запущена!\n\
+                 🎯 Стратегия службы: {}\n\
+                 {}\n\n\
+                 ✨ Zapret работает скрыто в фоновом режиме через системную службу Windows.\n\
+                 Никаких окон консоли не открывается, служба запускается автоматически при включении ПК.",
+                install_msg, service, strat, pid_info
             ))
         } else {
             Err(format!(
-                "Не удалось запустить Zapret через '{}'.\n\
-                 Возможно, запрос прав администратора (UAC) был отклонен или антивирус заблокировал WinDivert.",
-                bat_name
+                "Не удалось запустить службу Windows '{}'.\n\
+                 Проверьте, было ли подтверждено окно контроля учетных записей (UAC), либо запустите Service.bat (клавиша 'm').",
+                service
             ))
         }
     }
@@ -706,6 +911,54 @@ mod tests {
             found.unwrap().file_name().unwrap().to_string_lossy(),
             "general_custom_rule.bat"
         );
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_parse_strategy_bat() {
+        let temp_dir = std::env::temp_dir().join(format!("zapret_parse_test_{}", std::process::id()));
+        let _ = fs::create_dir_all(&temp_dir);
+
+        let bat_content = r#"@echo off
+set "BIN=%~dp0bin\"
+set "LISTS=%~dp0lists\"
+cd /d %BIN%
+
+start "zapret: %~n0" /min "%BIN%winws.exe" --wf-tcp=80,443,%GameFilterTCP% ^
+--filter-udp=443 --hostlist="%LISTS%list-general.txt" --new ^
+--filter-tcp=443 --dpi-desync=fake
+"#;
+        let bat_path = temp_dir.join("general (ALT11).bat");
+        fs::write(&bat_path, bat_content).unwrap();
+
+        let (strat_name, cmd) = ZapretManager::parse_strategy_bat(&bat_path, &temp_dir).unwrap();
+        assert_eq!(strat_name, "general (ALT11)");
+        assert!(cmd.contains("winws.exe"));
+        assert!(cmd.contains("--wf-tcp=80,443,12"));
+        assert!(cmd.contains("list-general.txt"));
+        assert!(cmd.contains("--dpi-desync=fake"));
+        assert!(!cmd.contains("%BIN%"));
+        assert!(!cmd.contains("%LISTS%"));
+        assert!(!cmd.contains("%GameFilterTCP%"));
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_list_available_strategies() {
+        let temp_dir = std::env::temp_dir().join(format!("zapret_list_test_{}", std::process::id()));
+        let _ = fs::create_dir_all(&temp_dir);
+
+        let _ = File::create(temp_dir.join("general (ALT).bat"));
+        let _ = File::create(temp_dir.join("general (ALT11).bat"));
+        let _ = File::create(temp_dir.join("service.bat"));
+        let _ = File::create(temp_dir.join("readme.txt"));
+
+        let list = ZapretManager::list_available_strategies(&temp_dir);
+        assert_eq!(list.len(), 2);
+        assert!(list.contains(&"general (ALT)".to_string()));
+        assert!(list.contains(&"general (ALT11)".to_string()));
 
         let _ = fs::remove_dir_all(&temp_dir);
     }
